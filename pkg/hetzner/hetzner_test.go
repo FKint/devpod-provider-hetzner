@@ -97,3 +97,36 @@ func TestGenerateUserDataPersistsDocker(t *testing.T) {
 
 	assert.Contains(t, files["/etc/systemd/system/docker.service.d/10-devpod-volume.conf"], "RequiresMountsFor=/home/devpod")
 }
+
+func TestGenerateUserDataOOMProtection(t *testing.T) {
+	buf, err := generateUserData("machine", "ssh-ed25519 AAAA test\n", 1234)
+	assert.NoError(t, err)
+
+	var cfg struct {
+		Swap struct {
+			Filename string `yaml:"filename"`
+			Size     int64  `yaml:"size"`
+		} `yaml:"swap"`
+		WriteFiles []struct {
+			Path    string `yaml:"path"`
+			Content string `yaml:"content"`
+		} `yaml:"write_files"`
+	}
+	assert.NoError(t, yaml.Unmarshal(buf.Bytes(), &cfg))
+	assert.Equal(t, "/swapfile", cfg.Swap.Filename)
+	assert.Equal(t, int64(8<<30), cfg.Swap.Size)
+
+	files := map[string]string{}
+	for _, f := range cfg.WriteFiles {
+		files[f.Path] = f.Content
+	}
+	assert.Contains(t, files["/etc/systemd/system/ssh.service.d/10-devpod-oom.conf"], "OOMScoreAdjust=-900")
+	assert.Contains(t, files["/etc/systemd/system/sshd.service.d/10-devpod-oom.conf"], "OOMScoreAdjust=-900")
+	assert.Contains(t, files["/etc/systemd/system/devpod.slice"], "MemoryMax=90%")
+
+	var daemon struct {
+		CgroupParent string `json:"cgroup-parent"`
+	}
+	assert.NoError(t, json.Unmarshal([]byte(files["/etc/docker/daemon.json"]), &daemon))
+	assert.Equal(t, "devpod.slice", daemon.CgroupParent)
+}

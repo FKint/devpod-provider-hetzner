@@ -12,7 +12,14 @@ packages:
   - ufw
 package_reboot_if_required: false
 package_update: false
+# Swap on the (local) root disk as a buffer against OOM kills. Fixed rather
+# than "auto", which only gives ~sqrt(RAM) (2 GiB on a cx22).
+swap:
+  filename: /swapfile
+  size: 8589934592
 runcmd:
+  # Load the systemd units and drop-ins from write_files
+  - systemctl daemon-reload
   # Secure SSHD
   - [
       sed,
@@ -46,6 +53,7 @@ write_files:
     content: |
       {
         "data-root": "/home/{{ .Username }}/.devpod/docker",
+        "cgroup-parent": "devpod.slice",
         "features": {
           "buildkit": true,
           "containerd-snapshotter": false
@@ -57,3 +65,27 @@ write_files:
     content: |
       [Unit]
       RequiresMountsFor=/home/{{ .Username }}
+  # Keep SSH sessions alive under memory pressure so the machine stays
+  # reachable; the OOM killer picks container processes first. -900 rather
+  # than -1000 so a runaway process started over SSH can still be killed.
+  # The unit is ssh.service on Debian/Ubuntu and sshd.service elsewhere.
+  - path: /etc/systemd/system/ssh.service.d/10-devpod-oom.conf
+    content: |
+      [Service]
+      OOMScoreAdjust=-900
+  - path: /etc/systemd/system/sshd.service.d/10-devpod-oom.conf
+    content: |
+      [Service]
+      OOMScoreAdjust=-900
+  # Cap the combined memory of all containers (via cgroup-parent in
+  # daemon.json) so sshd, dockerd and containerd always have headroom. Above
+  # MemoryHigh containers are throttled and pushed to swap; at MemoryMax the
+  # OOM killer runs inside the slice only. Percentages are of physical RAM.
+  - path: /etc/systemd/system/devpod.slice
+    content: |
+      [Unit]
+      Description=DevPod containers
+
+      [Slice]
+      MemoryHigh=85%
+      MemoryMax=90%
