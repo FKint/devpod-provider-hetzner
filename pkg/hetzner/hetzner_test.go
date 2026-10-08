@@ -17,10 +17,12 @@
 package hetzner
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"gopkg.in/yaml.v3"
 )
 
 func TestFingerPrintGenerate(t *testing.T) {
@@ -66,4 +68,32 @@ func TestFingerPrintGenerate(t *testing.T) {
 			assert.Equal(t, f, test.Fingerprint)
 		})
 	}
+}
+
+func TestGenerateUserDataPersistsDocker(t *testing.T) {
+	buf, err := generateUserData("machine", "ssh-ed25519 AAAA test\n", 1234)
+	assert.NoError(t, err)
+
+	var cfg struct {
+		WriteFiles []struct {
+			Path    string `yaml:"path"`
+			Content string `yaml:"content"`
+		} `yaml:"write_files"`
+	}
+	assert.NoError(t, yaml.Unmarshal(buf.Bytes(), &cfg))
+
+	files := map[string]string{}
+	for _, f := range cfg.WriteFiles {
+		files[f.Path] = f.Content
+	}
+
+	var daemon struct {
+		DataRoot string          `json:"data-root"`
+		Features map[string]bool `json:"features"`
+	}
+	assert.NoError(t, json.Unmarshal([]byte(files["/etc/docker/daemon.json"]), &daemon))
+	assert.Equal(t, "/home/devpod/.devpod/docker", daemon.DataRoot)
+	assert.False(t, daemon.Features["containerd-snapshotter"])
+
+	assert.Contains(t, files["/etc/systemd/system/docker.service.d/10-devpod-volume.conf"], "RequiresMountsFor=/home/devpod")
 }

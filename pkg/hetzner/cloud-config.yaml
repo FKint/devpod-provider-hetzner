@@ -28,6 +28,7 @@ runcmd:
   - ufw enable
   # Install Docker
   - if docker ; then echo "Docker already installed"; else curl -fsSL https://get.docker.com | sh; fi
+  - systemctl daemon-reload
   - systemctl restart docker
 timezone: UTC
 users:
@@ -44,8 +45,15 @@ write_files:
   - path: /etc/docker/daemon.json
     content: |
       {
+        "data-root": "/home/{{ .Username }}/.devpod/docker",
         "features": {
-          "buildkit": true
+          "buildkit": true,
+          "containerd-snapshotter": false
         },
         "live-restore": true
       }
+  # Don't start Docker until the persistent volume is mounted
+  - path: /etc/systemd/system/docker.service.d/10-devpod-volume.conf
+    content: |
+      [Unit]
+      RequiresMountsFor=/home/{{ .Username }}

@@ -46,6 +46,14 @@ To use this provider in your DevPod setup, you will need to do the following ste
 1. Get an [API token](https://docs.hetzner.com/cloud/api/getting-started/generating-api-token/)
    from Hetzner with `read & write` access. This will be used to manage resources.
 
+### Persistent storage
+
+Each workspace gets a Hetzner Cloud volume (sized by `DISK_SIZE`) that survives
+`stop`/`start`. The volume holds the `devpod` user's home directory and Docker's
+data root (`/home/devpod/.devpod/docker`), so images, containers, build cache and
+Docker volumes all persist between restarts. Size `DISK_SIZE` to fit them.
+`delete` removes the volume.
+
 ## Development
 
 ### Required environment variables
