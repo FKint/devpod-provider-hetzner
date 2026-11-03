@@ -16,6 +16,7 @@ created by Simon Emms. All credit for the original work goes to the original aut
   - [Required environment variables](#required-environment-variables)
   - [Testing independently of DevPod](#testing-independently-of-devpod)
   - [Testing in the DevPod ecosystem](#testing-in-the-devpod-ecosystem)
+  - [Releasing](#releasing)
 - [Contributing](#contributing)
   - [Open in a container](#open-in-a-container)
   - [Commit style](#commit-style)
@@ -105,6 +106,57 @@ To test the provider within the DevPod ecosystem:
    ```shell
    mv ./devpod-provider-hetzner ~/.devpod/contexts/default/providers/hetzner/binaries/hetzner_provider/devpod-provider-hetzner-linux-amd64
    ```
+
+### Releasing
+
+Releases are cut by pushing a `v*.*.*` tag. The [Build workflow](.github/workflows/build.yml)
+then runs `commitlint`, `test`, `build` and `e2e` (real Hetzner servers), and
+only when all pass does `publish` create the GitHub release with the binaries,
+`provider.yaml` and a generated changelog.
+
+One-time repository setup (Settings → Environments):
+
+- **Hetzner E2E**: secrets `HCLOUD_TOKEN` (read & write) and `SSH_KEY`
+- **Release**: secret `HCLOUD_TOKEN` with a **read-only** token, used only to
+  generate `provider.yaml`
+
+To cut a release:
+
+1. Merge everything for the release into `main` and wait for its Build run to
+   be green. All commits must pass commitlint (see [Commit style](#commit-style)).
+1. Optionally dry-run the whole pipeline except `publish` (a non-tag run skips
+   it): `gh workflow run build.yml --ref main`.
+1. Optionally validate `publish` with a throwaway pre-release tag, then delete
+   the release and tag afterwards:
+
+   ```shell
+   git tag v0.0.1-rc.1 && git push origin v0.0.1-rc.1
+   gh run watch
+   gh release delete v0.0.1-rc.1 --cleanup-tag --yes
+   ```
+
+1. Tag the release and push the tag:
+
+   ```shell
+   git checkout main && git pull
+   git tag -a v1.2.3 -m "v1.2.3"
+   git push origin v1.2.3
+   ```
+
+1. Watch the run (`gh run watch`) and approve the environment gates if prompted.
+1. Check the release page lists all six binaries
+   (`linux`/`windows`/`darwin` × `amd64`/`arm64`) and `provider.yaml`, then
+   confirm DevPod can install it:
+
+   ```shell
+   devpod provider add https://github.com/FKint/devpod-provider-hetzner/releases/download/v1.2.3/provider.yaml
+   ```
+
+If a tag run fails, fix the cause, delete the tag
+(`git push --delete origin v1.2.3 && git tag -d v1.2.3`) and push it again, or
+use a new version. If e2e fails because Hetzner retired the `cpx22` machine
+type, update `MACHINE_TYPE` in the workflow. Check Hetzner for leftover
+`test-*` servers, volumes and SSH keys after any failed e2e run.
 
 ## Contributing
 
