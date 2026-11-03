@@ -14,7 +14,7 @@
 
 FROM golang AS builder
 ARG GIT_COMMIT
-ARG GIT_REPO="github.com/mrsimonemms/devpod-provider-hetzner"
+ARG GIT_REPO="github.com/FKint/devpod-provider-hetzner"
 ARG PROJECT_NAME="devpod-provider-hetzner"
 ARG VERSION
 WORKDIR /app

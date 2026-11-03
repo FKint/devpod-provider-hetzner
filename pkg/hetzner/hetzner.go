@@ -34,7 +34,7 @@ import (
 	"github.com/loft-sh/devpod/pkg/client"
 	"github.com/loft-sh/devpod/pkg/ssh"
 	"github.com/loft-sh/log"
-	"github.com/mrsimonemms/devpod-provider-hetzner/pkg/options"
+	"github.com/FKint/devpod-provider-hetzner/pkg/options"
 	hga "github.com/mrsimonemms/hetzner-golang-actions"
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v3"

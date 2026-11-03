@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/mrsimonemms/devpod-provider-hetzner/pkg/hetzner"
-	"github.com/mrsimonemms/devpod-provider-hetzner/pkg/options"
+	"github.com/FKint/devpod-provider-hetzner/pkg/hetzner"
+	"github.com/FKint/devpod-provider-hetzner/pkg/options"
 	"github.com/spf13/cobra"
 )
 

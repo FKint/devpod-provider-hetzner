@@ -16,7 +16,7 @@
 
 package main
 
-import "github.com/mrsimonemms/devpod-provider-hetzner/cmd"
+import "github.com/FKint/devpod-provider-hetzner/cmd"
 
 func main() {
 	cmd.Execute()
