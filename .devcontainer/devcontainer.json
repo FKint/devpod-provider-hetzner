@@ -25,7 +25,7 @@
   },
   "containerEnv": {
     "DEVPOD_LOG_LEVEL": "debug",
-    "GIT_REPO": "github.com/mrsimonemms/devpod-provider-hetzner",
+    "GIT_REPO": "github.com/FKint/devpod-provider-hetzner",
     "DISK_IMAGE": "docker-ce",
     "DISK_SIZE": "30",
     "MACHINE_ID": "some-machine-id",

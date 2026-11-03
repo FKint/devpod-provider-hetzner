@@ -1,4 +1,4 @@
-module github.com/mrsimonemms/devpod-provider-hetzner
+module github.com/FKint/devpod-provider-hetzner
 
 go 1.24.3
 

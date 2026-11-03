@@ -1,9 +1,13 @@
 # DevPod Provider Hetzner
 
 <!-- markdownlint-disable-next-line MD013 MD034 -->
-[![Go Report Card](https://goreportcard.com/badge/github.com/mrsimonemms/devpod-provider-hetzner)](https://goreportcard.com/report/github.com/mrsimonemms/devpod-provider-hetzner)
+[![Go Report Card](https://goreportcard.com/badge/github.com/FKint/devpod-provider-hetzner)](https://goreportcard.com/report/github.com/FKint/devpod-provider-hetzner)
 
 DevPod on Hetzner
+
+This is a fork of
+[mrsimonemms/devpod-provider-hetzner](https://github.com/mrsimonemms/devpod-provider-hetzner),
+created by Simon Emms. All credit for the original work goes to the original author.
 
 <!-- toc -->
 
@@ -41,7 +45,7 @@ To use this provider in your DevPod setup, you will need to do the following ste
 
 1. See the [DevPod documentation](https://devpod.sh/docs/managing-providers/add-provider)
    for how to add a provider
-1. Use the reference `mrsimonemms/devpod-provider-hetzner` to download the latest
+1. Use the reference `FKint/devpod-provider-hetzner` to download the latest
    release from GitHub
 1. Get an [API token](https://docs.hetzner.com/cloud/api/getting-started/generating-api-token/)
    from Hetzner with `read & write` access. This will be used to manage resources.
@@ -56,7 +60,7 @@ To use this provider in your DevPod setup, you will need to do the following ste
 | --- | --- | --- |
 | `DISK_IMAGE` | Hetzner image tag | `docker-ce` |
 | `DISK_SIZE` | Disk size in GB | `30` |
-| `GIT_REPO` | Git repo to download | `github.com/mrsimonemms/devpod-provider-hetzner` |
+| `GIT_REPO` | Git repo to download | `github.com/FKint/devpod-provider-hetzner` |
 | `HCLOUD_TOKEN` | [Hetzner API token](https://docs.hetzner.com/cloud/api/getting-started/generating-api-token/) with `read & write` access | - |
 | `MACHINE_FOLDER` | Local home folder | `~/.ssh` |
 | `MACHINE_ID` | Unique identifier for the machine | `some-machine-id` |

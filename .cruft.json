@@ -7,7 +7,7 @@
       "project_name": "devpod-provider-hetzner",
       "description": "DevPod on Hetzner",
       "author": "Simon Emms <simon@simonemms.com>",
-      "repo": "github.com/mrsimonemms/devpod-provider-hetzner",
+      "repo": "github.com/FKint/devpod-provider-hetzner",
       "use_viper": false,
       "_template": "https://github.com/mrsimonemms/new",
       "_commit": "31026d30d7422cb70b7dc482b946e292a6e12434"

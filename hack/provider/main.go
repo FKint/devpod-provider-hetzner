@@ -129,13 +129,13 @@ func BuildConfig(
 	defaultMachineType string,
 	machineTypes types.OptionEnumArray,
 ) provider.ProviderConfig {
-	releaseURLBase := fmt.Sprintf("https://github.com/mrsimonemms/devpod-provider-hetzner/releases/download/%s", version)
+	releaseURLBase := fmt.Sprintf("https://github.com/FKint/devpod-provider-hetzner/releases/download/%s", version)
 
 	return provider.ProviderConfig{
 		Name:        "hetzner",
 		Version:     version,
 		Description: "DevPod on Hetzner",
-		Icon:        "https://raw.githubusercontent.com/mrsimonemms/devpod-provider-hetzner/main/assets/hetzner.png",
+		Icon:        "https://raw.githubusercontent.com/FKint/devpod-provider-hetzner/main/assets/hetzner.png",
 		OptionGroups: []provider.ProviderOptionGroup{
 			{
 				Name:           "Hetzner options",
