@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"sigs.k8s.io/yaml"
 )
 
 func TestFingerPrintGenerate(t *testing.T) {
@@ -108,5 +109,17 @@ func TestGenerateUserDataSSHDHardening(t *testing.T) {
 
 	out := buf.String()
 	assert.Contains(t, out, "/etc/ssh/sshd_config.d/00-devpod.conf")
-	assert.Contains(t, out, "systemctl restart ssh || systemctl restart sshd")
+	assert.Contains(t, out, "systemctl restart ssh;")
+	assert.Contains(t, out, "sed -i '1i PermitRootLogin no'")
+}
+
+func TestGenerateUserDataIsValidYAML(t *testing.T) {
+	buf, err := generateUserData("ssh-ed25519 AAAA test", 1)
+	assert.NoError(t, err)
+
+	var cfg struct {
+		RunCmd []any `json:"runcmd"`
+	}
+	assert.NoError(t, yaml.Unmarshal(buf.Bytes(), &cfg))
+	assert.NotEmpty(t, cfg.RunCmd)
 }

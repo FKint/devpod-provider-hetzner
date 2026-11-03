@@ -22,6 +22,7 @@ import (
 	"crypto/rand"
 	"embed"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -207,6 +208,11 @@ func (h *Hetzner) Create(
 	}()
 
 	if volume == nil {
+		// Only a new volume uses the size, so only then does the minimum apply
+		if diskSize < options.MinDiskSizeGB {
+			return fmt.Errorf("%w: need at least %dGB, got %d", ErrDiskTooSmall, options.MinDiskSizeGB, diskSize)
+		}
+
 		// Create the volume as it doesn't exist
 		log.Default.Info("Creating a new volume")
 
@@ -251,10 +257,13 @@ func (h *Hetzner) Create(
 	// Create the server
 	log.Default.Info("Creating a new server")
 	server, _, err := h.client.Server.Create(ctx, *req)
+	if server.Server != nil {
+		// Track it even when err is set: the API may have created it before failing
+		createdServer = server.Server
+	}
 	if err != nil {
 		return err
 	}
-	createdServer = server.Server
 
 	log.Default.Info("Server creation triggered")
 
@@ -265,7 +274,7 @@ func (h *Hetzner) Create(
 
 	log.Default.Info("Server created - provisioning")
 
-	return waitForProvisioned(ctx, server.Server, privateKeyFile)
+	return waitForProvisioned(ctx, server.Server, privateKeyFile, false)
 }
 
 // startExisting brings an already existing server to the provisioned state.
@@ -290,10 +299,10 @@ func (h *Hetzner) startExisting(ctx context.Context, server *hcloud.Server, priv
 		return fmt.Errorf("%w: server %s is %s, try again shortly", ErrServerBusy, server.Name, server.Status)
 	}
 
-	if err := waitForProvisioned(ctx, server, privateKeyFile); err != nil {
+	if err := waitForProvisioned(ctx, server, privateKeyFile, true); err != nil {
 		return fmt.Errorf(
-			"%w (the existing server was left in place; if this machine's SSH key was regenerated it can't be reached - "+
-				"run delete to remove it and start again)",
+			"%w (the existing server was left in place; if this machine's SSH key was regenerated it can't be reached. "+
+				"Running delete removes the server AND its volume, including any data on it)",
 			err,
 		)
 	}
@@ -333,30 +342,39 @@ func (h *Hetzner) rollback(ctx context.Context, name string, server *hcloud.Serv
 }
 
 // waitForProvisioned polls cloud-init over SSH until it reports success, fails or the timeout expires.
-func waitForProvisioned(ctx context.Context, server *hcloud.Server, privateKeyFile []byte) error {
+// With failOnAuth, repeated authentication refusals are treated as an error: the server
+// is up but doesn't accept this machine's key (e.g. the key pair was regenerated).
+func waitForProvisioned(ctx context.Context, server *hcloud.Server, privateKeyFile []byte, failOnAuth bool) error {
 	ctx, cancel := context.WithTimeout(ctx, provisionTimeout)
 	defer cancel()
 
-	errorCount := 0
+	errorCount, authCount := 0, 0
 	for attempt := 1; ; attempt++ {
 		log.Default.Debugf("Provisioning check %d", attempt)
 
-		status := attemptConnection(ctx, server.PublicNet.IPv4.IP.String(), privateKeyFile)
+		status, err := attemptConnection(ctx, server.PublicNet.IPv4.IP.String(), privateKeyFile)
 		switch {
-		case status == nil:
-			// Not reachable yet - the "error" reports must be consecutive
-			errorCount = 0
+		case errors.Is(err, errSSHAuth):
+			authCount++
+			if failOnAuth && authCount >= authFailureThreshold {
+				return fmt.Errorf("%w: server %s refused this machine's SSH key", ErrProvisioningFailed, server.Name)
+			}
+		case err != nil:
+			// Not reachable yet, or a transient failure. Only answers from cloud-init
+			// count towards the consecutive "error" reports, so leave the count alone.
+			authCount = 0
 		case isCloudInitDone(status.Status):
 			log.Default.Info("Server provisioned")
 			return nil
 		case isCloudInitFailed(status.Status):
+			authCount = 0
 			// Require the failure to persist so a transient report doesn't destroy a server
 			errorCount++
 			if errorCount >= cloudInitErrorThreshold {
 				return fmt.Errorf("%w: cloud-init status %q", ErrProvisioningFailed, status.Status)
 			}
 		default:
-			errorCount = 0
+			authCount, errorCount = 0, 0
 			log.Default.Debug("Server not yet provisioned")
 		}
 
@@ -594,7 +612,9 @@ func (h *Hetzner) volumeByName(ctx context.Context, name string) (*hcloud.Volume
 	return volumes[0], nil
 }
 
-func attemptConnection(ctx context.Context, addr string, privateKeyFile []byte) *cloudInit {
+// attemptConnection returns the cloud-init status, or an error if it couldn't be retrieved
+// (errSSHAuth if the server refused our key).
+func attemptConnection(ctx context.Context, addr string, privateKeyFile []byte) (*cloudInit, error) {
 	log.Default.Debug("Checking server provision status")
 
 	target := fmt.Sprintf("%s:%d", addr, SSHPort)
@@ -608,7 +628,7 @@ func attemptConnection(ctx context.Context, addr string, privateKeyFile []byte) 
 	conn, err := (&net.Dialer{Timeout: sshDialTimeout}).DialContext(ctx, "tcp", target)
 	if err != nil {
 		log.Default.Debugf("Server not reachable yet: %v", err)
-		return nil
+		return nil, err
 	}
 	_ = conn.Close()
 
@@ -616,7 +636,10 @@ func attemptConnection(ctx context.Context, addr string, privateKeyFile []byte) 
 	sshClient, err := newSSHClient(ctx, target, privateKeyFile)
 	if err != nil {
 		log.Default.Warnf("Unable to connect to server: %v", err)
-		return nil
+		if strings.Contains(err.Error(), "unable to authenticate") {
+			return nil, fmt.Errorf("%w: %w", errSSHAuth, err)
+		}
+		return nil, err
 	}
 	defer func() {
 		if err := sshClient.Close(); err != nil {
@@ -627,20 +650,22 @@ func attemptConnection(ctx context.Context, addr string, privateKeyFile []byte) 
 	buf := new(bytes.Buffer)
 	if err := ssh.Run(ctx, sshClient, "cloud-init status || true", &bytes.Buffer{}, buf, &bytes.Buffer{}, nil); err != nil {
 		log.Default.Errorf("Error retrieving cloud-init status, %v", err)
-		return nil
+		return nil, err
 	}
 
 	status, err := parseCloudInitStatus(buf.Bytes())
 	if err != nil {
 		log.Default.Errorf("Unable to parse cloud-init YAML: %v", err)
-		return nil
+		return nil, err
 	}
 
-	return status
+	return status, nil
 }
 
 // newSSHClient wraps ssh.NewSSHClient, which takes no context or timeout, so a
 // stalled handshake is abandoned when ctx ends instead of blocking forever.
+// The abandoned goroutine (and its socket) lives until the handshake returns or the OS
+// gives up, which is bounded by the one-attempt-per-poll cadence and the provisioning timeout.
 func newSSHClient(ctx context.Context, target string, privateKey []byte) (*cryptoSsh.Client, error) {
 	type result struct {
 		client *cryptoSsh.Client
