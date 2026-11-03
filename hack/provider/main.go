@@ -31,6 +31,12 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+const (
+	osLinux   = "linux"
+	archAMD64 = "amd64"
+	archARM64 = "arm64"
+)
+
 var checksumMap = map[string]string{
 	"./dist/devpod-provider-hetzner-linux-amd64":       "CHECKSUM_LINUX_AMD64",
 	"./dist/devpod-provider-hetzner-linux-arm64":       "CHECKSUM_LINUX_ARM64",
@@ -192,7 +198,7 @@ fi`,
 				Description: "If DevPod should inject git credentials into the remote host.",
 				Default:     "true",
 			},
-			"INJECT_DOCKER_CREDENTIALS": {
+			"INJECT_DOCKER_CREDENTIALS": { //nolint:gosec // option name, not a credential
 				Description: "If DevPod should inject docker credentials into the remote host.",
 				Default:     "true",
 			},
@@ -214,14 +220,14 @@ fi`,
 			Binaries: map[string][]*provider.ProviderBinary{
 				"HETZNER_PROVIDER": {
 					{
-						OS:       "linux",
-						Arch:     "amd64",
+						OS:       osLinux,
+						Arch:     archAMD64,
 						Path:     fmt.Sprintf("%s/devpod-provider-hetzner-linux-amd64", releaseURLBase),
 						Checksum: checksum["CHECKSUM_LINUX_AMD64"],
 					},
 					{
-						OS:       "linux",
-						Arch:     "arm64",
+						OS:       osLinux,
+						Arch:     archARM64,
 						Path:     fmt.Sprintf("%s/devpod-provider-hetzner-linux-arm64", releaseURLBase),
 						Checksum: checksum["CHECKSUM_LINUX_ARM64"],
 					},
@@ -234,32 +240,32 @@ fi`,
 		Binaries: map[string][]*provider.ProviderBinary{
 			"HETZNER_PROVIDER": {
 				{
-					OS:       "linux",
-					Arch:     "amd64",
+					OS:       osLinux,
+					Arch:     archAMD64,
 					Path:     fmt.Sprintf("%s/devpod-provider-hetzner-linux-amd64", releaseURLBase),
 					Checksum: checksum["CHECKSUM_LINUX_AMD64"],
 				},
 				{
-					OS:       "linux",
-					Arch:     "arm64",
+					OS:       osLinux,
+					Arch:     archARM64,
 					Path:     fmt.Sprintf("%s/devpod-provider-hetzner-linux-arm64", releaseURLBase),
 					Checksum: checksum["CHECKSUM_LINUX_ARM64"],
 				},
 				{
 					OS:       "darwin",
-					Arch:     "amd64",
+					Arch:     archAMD64,
 					Path:     fmt.Sprintf("%s/devpod-provider-hetzner-darwin-amd64", releaseURLBase),
 					Checksum: checksum["CHECKSUM_DARWIN_AMD64"],
 				},
 				{
 					OS:       "darwin",
-					Arch:     "arm64",
+					Arch:     archARM64,
 					Path:     fmt.Sprintf("%s/devpod-provider-hetzner-darwin-arm64", releaseURLBase),
 					Checksum: checksum["CHECKSUM_DARWIN_ARM64"],
 				},
 				{
 					OS:       "windows",
-					Arch:     "amd64",
+					Arch:     archAMD64,
 					Path:     fmt.Sprintf("%s/devpod-provider-hetzner-windows-amd64.exe", releaseURLBase),
 					Checksum: checksum["CHECKSUM_WINDOWS_AMD64"],
 				},
