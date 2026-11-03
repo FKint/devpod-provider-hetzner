@@ -4,15 +4,26 @@ mounts:
   - - /dev/disk/by-id/scsi-0HC_Volume_{{ .VolumeID }}
     - /home/{{ .Username }}
     - ext4
-    - discard,nofail,defaults
+    # No online discard: it slows every delete on the network volume. Freed
+    # blocks are trimmed once per boot instead (see runcmd).
+    - noatime,nofail,defaults
     - "0"
     - "0"
-packages:
-  - curl
-  - ufw
+# No "packages:" list: it makes cloud-init refresh the package lists on every
+# start (12-18s), even when everything is already installed. runcmd installs
+# what is missing instead.
 package_reboot_if_required: false
 package_update: false
+{{- if .Machine.SwapSizeBytes }}
+# Swap on the (local) root disk as a buffer against OOM kills (SWAP_SIZE).
+# Fixed rather than "auto", which only gives ~sqrt(RAM).
+swap:
+  filename: /swapfile
+  size: {{ .Machine.SwapSizeBytes }}
+{{- end }}
 runcmd:
+  # Load the systemd units and drop-ins from write_files
+  - systemctl daemon-reload
   # Secure SSHD
   # PermitRootLogin is set by the sshd_config.d drop-in below
   # Without an Include for sshd_config.d the drop-in is ignored; first match wins, so put it on top
@@ -20,12 +31,35 @@ runcmd:
   # The unit is "ssh" on Debian/Ubuntu and "sshd" elsewhere
   - "if systemctl cat ssh.service >/dev/null 2>&1; then systemctl restart ssh; else systemctl restart sshd; fi"
   - [rm, -f, /root/.ssh/authorized_keys]
+  # curl and ufw ship with the usual images; only refresh the package lists if one is missing
+  - command -v curl >/dev/null && command -v ufw >/dev/null || { apt-get update -qq && apt-get install -y -qq curl ufw; }
   # Secure UFW
   - ufw allow ssh
   - ufw --force enable
   # Install Docker
   - if docker ; then echo "Docker already installed"; else curl -fsSL https://get.docker.com | sh; fi
-  - systemctl restart docker
+  # The volume holds the home directory and workspaces, and (PERSIST_DOCKER)
+  # all Docker and containerd state (see write_files). containerd can start
+  # before its drop-in is written, so restart both, containerd first. runcmd
+  # doesn't stop on errors, so fail provisioning explicitly instead.
+  - mountpoint -q /home/{{ .Username }} || exit 1
+  - systemctl daemon-reload
+  - systemctl restart containerd && systemctl restart docker || exit 1
+  # Clean up before DevPod connects (it waits for cloud-init), so this can't
+  # race a container recreate. Never fail provisioning over it.
+{{- if .Machine.PruneImagesAfter }}
+  # Unused images older than PRUNE_IMAGES_AFTER, e.g. superseded dev container
+  # builds. Images used by any container, running or stopped, are kept.
+  - docker image prune --all --force --filter until={{ .Machine.PruneImagesAfter }} || true
+{{- end }}
+{{- if .Machine.PruneAnonymousVolumes }}
+  # Anonymous volumes only (named volumes are kept): "devpod up --recreate"
+  # removes the old container but not its anonymous volumes.
+  - docker volume prune --force || true
+{{- end }}
+  # Timer stamps don't survive a stop (the server is deleted), so the weekly
+  # fstrim.timer would rarely run. Trim in the background instead.
+  - systemd-run --collect --unit=devpod-fstrim fstrim /home/{{ .Username }} || true
 timezone: UTC
 users:
   - name: "{{ .Username }}"
@@ -42,11 +76,72 @@ write_files:
   - path: /etc/ssh/sshd_config.d/00-devpod.conf
     content: |
       PermitRootLogin no
+  # With PERSIST_DOCKER, Docker's data root (volumes, container configs, build
+  # state) lives on the volume. The containerd image store
+  # (CONTAINERD_IMAGE_STORE) is set explicitly: it is the default only on
+  # fresh Engine 29+ installs. Its images and container snapshots live under
+  # containerd's root, below.
   - path: /etc/docker/daemon.json
     content: |
       {
+{{- if .Machine.PersistDocker }}
+        "data-root": "/home/{{ .Username }}/.devpod/docker",
+{{- end }}
+        "cgroup-parent": "devpod.slice",
         "features": {
-          "buildkit": true
+          "buildkit": true,
+          "containerd-snapshotter": {{ .Machine.ContainerdImageStore }}
         },
+        "builder": {
+          "gc": {
+            "enabled": true,
+            "defaultKeepStorage": "{{ .Machine.BuildCacheSize }}"
+          }
+        },
+        "log-driver": "local",
         "live-restore": true
       }
+{{- if .Machine.PersistDocker }}
+  # Don't start Docker or containerd until the persistent volume is mounted
+  - path: /etc/systemd/system/docker.service.d/10-devpod-volume.conf
+    content: |
+      [Unit]
+      RequiresMountsFor=/home/{{ .Username }}
+  # containerd's root moves with a flag rather than in config.toml: the
+  # packaged config stays untouched, and its format differs between
+  # containerd 1.x and 2.x.
+  - path: /etc/systemd/system/containerd.service.d/10-devpod-volume.conf
+    content: |
+      [Unit]
+      RequiresMountsFor=/home/{{ .Username }}
+
+      [Service]
+      ExecStart=
+      ExecStart=/usr/bin/containerd --root /home/{{ .Username }}/.devpod/containerd
+{{- end }}
+  # Keep SSH sessions alive under memory pressure so the machine stays
+  # reachable; the OOM killer picks container processes first. -900 rather
+  # than -1000 so a runaway process started over SSH can still be killed.
+  # The unit is ssh.service on Debian/Ubuntu and sshd.service elsewhere.
+  - path: /etc/systemd/system/ssh.service.d/10-devpod-oom.conf
+    content: |
+      [Service]
+      OOMScoreAdjust=-900
+  - path: /etc/systemd/system/sshd.service.d/10-devpod-oom.conf
+    content: |
+      [Service]
+      OOMScoreAdjust=-900
+  # Cap the combined memory of all containers (via cgroup-parent in
+  # daemon.json) so sshd, dockerd and containerd always have headroom. Above
+  # MemoryHigh containers are throttled and pushed to swap; at MemoryMax the
+  # OOM killer runs inside the slice only. Percentages are of physical RAM.
+  # CONTAINERS_MEMORY_HIGH / CONTAINERS_MEMORY_MAX / CONTAINERS_SWAP_MAX.
+  - path: /etc/systemd/system/devpod.slice
+    content: |
+      [Unit]
+      Description=DevPod containers
+
+      [Slice]
+      MemoryHigh={{ .Machine.ContainersMemoryHigh }}
+      MemoryMax={{ .Machine.ContainersMemoryMax }}
+      MemorySwapMax={{ .Machine.ContainersSwapMax }}

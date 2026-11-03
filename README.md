@@ -12,6 +12,10 @@ created by Simon Emms. All credit for the original work goes to the original aut
 <!-- toc -->
 - [Project status](#project-status)
 - [Usage](#usage)
+  - [Persistent storage](#persistent-storage)
+    - [Machine options](#machine-options)
+    - [Per-workspace settings](#per-workspace-settings)
+    - [Recommended devcontainer settings](#recommended-devcontainer-settings)
 - [Development](#development)
   - [Required environment variables](#required-environment-variables)
   - [Testing independently of DevPod](#testing-independently-of-devpod)
@@ -46,6 +50,135 @@ To use this provider in your DevPod setup, you will need to do the following ste
    release from GitHub
 1. Get an [API token](https://docs.hetzner.com/cloud/api/getting-started/generating-api-token/)
    from Hetzner with `read & write` access. This will be used to manage resources.
+
+### Persistent storage
+
+`stop` deletes the server; only its Hetzner Cloud volume (sized by
+`DISK_SIZE`) survives until `delete`. Each DevPod machine has one volume.
+Workspaces sharing a machine (`devpod up --machine ...`, or a provider set up
+with `--single-machine`) share it. It holds:
+
+- the `devpod` user's home directory, including the workspace sources;
+- by default (`PERSIST_DOCKER`) all of Docker's state: its data root
+  (`/home/devpod/.devpod/docker`: named volumes, container configs, build cache)
+  and containerd's root (`/home/devpod/.devpod/containerd`: images and container
+  filesystems).
+
+By default, space is kept in check:
+
+- the build cache is capped at 5 GB;
+- container logs use the rotating `local` log driver;
+- at every start, before DevPod connects, images not used by any container and
+  older than a week are removed, as are unused anonymous volumes. Images used by
+  any container (running or stopped, of any workspace) and all named volumes
+  are kept.
+
+Plan for roughly 25–30 GB per workspace: two copies of the dev container image
+during a rebuild, its named volumes and sources, plus 20% headroom. Add about
+10 GB for every further similar workspace. `delete` removes the volume, and with
+it the data of **every** workspace on the machine.
+
+Persisted Docker state can be upgraded but not downgraded. Don't switch
+`DISK_IMAGE` to an image with an older Docker on an existing machine.
+
+#### Machine options
+
+These provider options set up the server itself, so they apply to every
+workspace on the machine. They take effect whenever the server is created, i.e.
+on the next start after a stop. Set defaults with
+`devpod provider set-options hetzner -o KEY=VALUE`, or change them for one
+workspace with `devpod up <workspace> --provider-option KEY=VALUE`.
+
+| Option | Default | Effect |
+| --- | --- | --- |
+| `DISK_SIZE` | `30` | Size of the volume in GB, when it is created. |
+| `PERSIST_DOCKER` | `true` | Keep Docker's images, containers, named volumes and build cache on the volume. With `false` they live on the server's local disk (faster, but lost on every stop). |
+| `CONTAINERD_IMAGE_STORE` | `true` | Use Docker's containerd image store. Switching it on an existing machine hides the other store's images and containers; they are rebuilt on the next start. |
+| `BUILD_CACHE_SIZE` | `5GB` | Build cache size kept by garbage collection. |
+| `PRUNE_IMAGES_AFTER` | `168h` | At start, remove images not used by any container that are older than this. `never` keeps them. |
+| `PRUNE_ANONYMOUS_VOLUMES` | `true` | At start, remove anonymous volumes not used by any container. Named volumes are never removed. |
+| `SWAP_SIZE` | `8` | Swap file in GB on the local disk (also where a tmpfs `/tmp` spills to). `0` disables it. |
+| `CONTAINERS_MEMORY_HIGH` | `infinity` | All containers together are throttled above this: a percentage of RAM, a size (`6G`) or `infinity`. Left off on purpose: a container throttled below the hard limit, with swap full, hung for minutes instead of being killed. |
+| `CONTAINERS_MEMORY_MAX` | `90%` | Hard limit for all containers together; above it the OOM killer stops a container process (within seconds in testing). |
+| `CONTAINERS_SWAP_MAX` | `50%` | Swap all containers together may use, as a percentage of RAM, a size (`4G`) or `infinity`. Keeps swap for the host. |
+
+#### Per-workspace settings
+
+Everything that concerns a single dev container is set in its
+`devcontainer.json`, not in the provider:
+
+| To | Set in `devcontainer.json` |
+| --- | --- |
+| Keep `/tmp` off the volume (in RAM, spilling to local swap) | `"mounts": ["type=tmpfs,target=/tmp,tmpfs-mode=1777,tmpfs-size=4g"]` |
+| …and allow running programs from it | `"runArgs": ["--tmpfs", "/tmp:exec,mode=1777,size=4g"]` instead (Docker mounts tmpfs `noexec` by default) |
+| Keep `/tmp` on disk | Leave it out: `/tmp` is then part of the container's filesystem, on the volume with `PERSIST_DOCKER` |
+| Enlarge shared memory (browsers, PyTorch data loaders) | `"runArgs": ["--shm-size=2g"]` |
+| Limit one container's memory or CPUs | `"runArgs": ["--memory=6g", "--cpus=2"]` (within `CONTAINERS_MEMORY_MAX`) |
+| Change log rotation | `"runArgs": ["--log-opt", "max-size=50m", "--log-opt", "max-file=3"]` |
+| Use another log driver | `"runArgs": ["--log-driver=json-file"]` |
+| Persist a directory per workspace | `"mounts": ["source=my-project-${devcontainerId}-data,target=/data,type=volume"]` |
+| Share a cache between workspaces | A named volume with a fixed name, e.g. `source=uv-cache,...` |
+| Scratch space on the local disk (fast, lost on stop, shared by the machine's workspaces) | `"mounts": ["source=/var/tmp,target=/scratch,type=bind"]` |
+| Set environment variables, e.g. cache locations | `"containerEnv": {"UV_CACHE_DIR": "/home/vscode/.uv-cache"}` |
+
+`devpod up --recreate` and `.devpodignore` (below) are per workspace too.
+
+#### Recommended devcontainer settings
+
+Start with `devpod up --recreate` to get a fresh container every time. The
+image is kept on the volume, so this skips the build unless the configuration
+changed.
+
+```jsonc
+{
+  "mounts": [
+    // /tmp in RAM, spilling to swap on the local disk, never to the volume.
+    // Keep the sizes of all workspaces on a machine within RAM + swap.
+    "type=tmpfs,target=/tmp,tmpfs-mode=1777,tmpfs-size=4g",
+    // Per-workspace state: include ${devcontainerId}, otherwise workspaces
+    // on the same machine share the volume.
+    "source=my-project-${devcontainerId}-state,target=/home/vscode/.state,type=volume",
+    // Keeps the VS Code server and extensions across container recreation
+    "source=my-project-${devcontainerId}-vscode,target=/home/vscode/.vscode-server,type=volume",
+    // Package caches: deliberately one per machine, shared by its workspaces
+    "source=uv-cache,target=/home/vscode/.uv-cache,type=volume"
+  ],
+  "containerEnv": { "UV_CACHE_DIR": "/home/vscode/.uv-cache" }
+}
+```
+
+- Named volumes mounted at paths that don't exist in the image are owned by
+  root, and so are any parent directories Docker has to create (so avoid e.g.
+  `~/.cache/uv` if `~/.cache` isn't in the image). Fix the top-level directory
+  once (`sudo chown vscode: <dir>`). Avoid `chown -R`, which re-walks the whole
+  volume on every container creation.
+- Keep `onCreateCommand`/`postCreateCommand` idempotent and cheap: they run on
+  every recreation. Put heavy setup in the Dockerfile or features, which are
+  cached in the image.
+- Pin the base image (by tag or digest). DevPod reuses the built image until
+  `devcontainer.json`, the Dockerfile or the features change, not when the base
+  image changes upstream.
+- Avoid `UV_LINK_MODE=symlink`: cleaning or pruning the cache then breaks
+  existing virtual environments.
+- Add a `.devpodignore` to the workspace root (`.dockerignore` syntax). It keeps
+  files out of the upload of a local folder and out of the volume. Exclude
+  anything the container rebuilds or that only fits your local OS:
+  dependencies, virtual environments, caches and build output.
+
+  ```gitignore
+  **/node_modules
+  **/.venv
+  **/__pycache__
+  **/.pytest_cache
+  **/.mypy_cache
+  **/.ruff_cache
+  .uv-cache
+  dist
+  build
+  ```
+
+  Patterns are relative to the workspace root: `node_modules` only matches the
+  top-level folder, `**/node_modules` matches it at any depth.
 
 ## Development
 

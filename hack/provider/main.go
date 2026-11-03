@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/FKint/devpod-provider-hetzner/pkg/options"
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 	"github.com/loft-sh/devpod/pkg/provider"
 	"github.com/loft-sh/devpod/pkg/types"
@@ -36,6 +37,13 @@ const (
 	archAMD64 = "amd64"
 	archARM64 = "arm64"
 )
+
+const (
+	optionTrue  = "true"
+	optionFalse = "false"
+)
+
+var boolEnum = types.OptionEnumArray{{Value: optionTrue}, {Value: optionFalse}}
 
 type platform struct{ os, arch string }
 
@@ -177,6 +185,21 @@ func BuildConfig(
 				},
 			},
 			{
+				Name:           "Docker options",
+				DefaultVisible: false,
+				Options: []string{
+					options.EnvPersistDocker,
+					options.EnvContainerdImageStore,
+					options.EnvBuildCacheSize,
+					options.EnvPruneImagesAfter,
+					options.EnvPruneAnonymousVolumes,
+					options.EnvSwapSize,
+					options.EnvContainersMemoryHigh,
+					options.EnvContainersMemoryMax,
+					options.EnvContainersSwapMax,
+				},
+			},
+			{
 				Name:           "Agent options",
 				DefaultVisible: false,
 				Options: []string{
@@ -222,17 +245,96 @@ fi`,
 				Enum:        machineTypes,
 				Local:       true,
 			},
+			// Machine options apply each time the server is created, i.e. on
+			// the next start after a stop.
+			options.EnvPersistDocker: {
+				Description: "Keep Docker's images, containers, named volumes and build cache on the volume, so they survive a stop. " +
+					"If false, they live on the server's local disk and are lost on every stop.",
+				Default: options.DefaultPersistDocker,
+				Enum:    boolEnum,
+				Local:   true,
+				Mutable: true,
+			},
+			options.EnvContainerdImageStore: {
+				Description: "Use Docker's containerd image store (the default for new Docker Engine 29+ installs). " +
+					"Switching it on an existing machine hides the images and containers of the other store until switched back; " +
+					"they are rebuilt on the next start.",
+				Default: options.DefaultContainerdImageStore,
+				Enum:    boolEnum,
+				Local:   true,
+				Mutable: true,
+			},
+			options.EnvBuildCacheSize: {
+				Description:       "Size of the Docker build cache kept by garbage collection, e.g. 5GB.",
+				Default:           options.DefaultBuildCacheSize,
+				ValidationPattern: options.PatternDockerSize,
+				ValidationMessage: "Use a size such as 5GB or 500MB.",
+				Local:             true,
+				Mutable:           true,
+			},
+			options.EnvPruneImagesAfter: {
+				Description: "At every start, remove images not used by any container that are older than this (e.g. 168h). " +
+					"\"never\" keeps them.",
+				Default:           options.DefaultPruneImagesAfter,
+				ValidationPattern: options.PatternPruneAge,
+				ValidationMessage: "Use a duration such as 168h, or never.",
+				Local:             true,
+				Mutable:           true,
+			},
+			options.EnvPruneAnonymousVolumes: {
+				Description: "At every start, remove anonymous volumes not used by any container. Named volumes are never removed.",
+				Default:     options.DefaultPruneAnonymousVolumes,
+				Enum:        boolEnum,
+				Local:       true,
+				Mutable:     true,
+			},
+			options.EnvSwapSize: {
+				Description:       "Swap file size in GB on the server's local disk. 0 disables swap.",
+				Default:           options.DefaultSwapSize,
+				ValidationPattern: options.PatternWholeNumber,
+				ValidationMessage: "Use whole GB, e.g. 8, or 0 for no swap.",
+				Local:             true,
+				Mutable:           true,
+			},
+			options.EnvContainersMemoryHigh: {
+				Description: "Memory above which all containers together are throttled and pushed to swap: " +
+					"a percentage of RAM (85%), a size (6G) or infinity (no throttling, the default: a throttled " +
+					"runaway container can hang for minutes instead of being killed).",
+				Default:           options.DefaultContainersMemoryHigh,
+				ValidationPattern: options.PatternSystemdMemory,
+				ValidationMessage: "Use a percentage of RAM (85%), a size (6G) or infinity.",
+				Local:             true,
+				Mutable:           true,
+			},
+			options.EnvContainersMemoryMax: {
+				Description: "Hard memory limit for all containers together; above it the OOM killer stops a container process. " +
+					"A percentage of RAM (90%), a size (7G) or infinity.",
+				Default:           options.DefaultContainersMemoryMax,
+				ValidationPattern: options.PatternSystemdMemory,
+				ValidationMessage: "Use a percentage of RAM (90%), a size (7G) or infinity.",
+				Local:             true,
+				Mutable:           true,
+			},
+			options.EnvContainersSwapMax: {
+				Description: "Swap all containers together may use, so some stays for the host and a runaway container " +
+					"reaches the memory limit (and is killed) sooner. A percentage of RAM (50%), a size (4G) or infinity.",
+				Default:           options.DefaultContainersSwapMax,
+				ValidationPattern: options.PatternSystemdMemory,
+				ValidationMessage: "Use a percentage of RAM (50%), a size (4G) or infinity.",
+				Local:             true,
+				Mutable:           true,
+			},
 			"INACTIVITY_TIMEOUT": {
 				Description: "If defined, will automatically stop the VM after the inactivity period.",
 				Default:     "10m",
 			},
 			"INJECT_GIT_CREDENTIALS": {
 				Description: "If DevPod should inject git credentials into the remote host.",
-				Default:     "true",
+				Default:     optionTrue,
 			},
 			"INJECT_DOCKER_CREDENTIALS": {
 				Description: "If DevPod should inject docker credentials into the remote host.",
-				Default:     "true",
+				Default:     optionTrue,
 			},
 			"AGENT_PATH": {
 				Description: "The path where to inject the DevPod agent to.",

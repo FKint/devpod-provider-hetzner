@@ -176,6 +176,7 @@ func (h *Hetzner) Create(
 	ctx context.Context,
 	req *hcloud.ServerCreateOpts,
 	diskSize int,
+	machine *options.Machine,
 	publicKey string,
 	privateKeyFile []byte,
 ) (err error) {
@@ -240,7 +241,7 @@ func (h *Hetzner) Create(
 	}
 
 	// Generate the config init
-	userData, err := generateUserData(publicKey, volume.ID)
+	userData, err := generateUserData(publicKey, volume.ID, machine)
 	if err != nil {
 		return err
 	}
@@ -712,17 +713,26 @@ func generateSSHKeyFingerprint(publicKey string) (string, error) {
 	return cryptoSsh.FingerprintLegacyMD5(pk), nil
 }
 
-func generateUserData(publicKey string, volumeID int64) (*bytes.Buffer, error) {
-	t, err := template.New("cloud-config.yaml").ParseFS(cloudConfig, "cloud-config.yaml")
+// userDataParams are the values rendered into cloud-config.yaml
+type userDataParams struct {
+	PublicKey string
+	VolumeID  string
+	Username  string
+	Machine   *options.Machine
+}
+
+func generateUserData(publicKey string, volumeID int64, machine *options.Machine) (*bytes.Buffer, error) {
+	t, err := template.New("cloud-config.yaml").Option("missingkey=error").ParseFS(cloudConfig, "cloud-config.yaml")
 	if err != nil {
 		return nil, err
 	}
 
 	buf := new(bytes.Buffer)
-	if err := t.Execute(buf, map[string]string{
-		"PublicKey": strings.TrimSuffix(publicKey, "\n"),
-		"VolumeID":  strconv.FormatInt(volumeID, 10),
-		"Username":  SSHUsername,
+	if err := t.Execute(buf, userDataParams{
+		PublicKey: strings.TrimSuffix(publicKey, "\n"),
+		VolumeID:  strconv.FormatInt(volumeID, 10),
+		Username:  SSHUsername,
+		Machine:   machine,
 	}); err != nil {
 		return nil, err
 	}
