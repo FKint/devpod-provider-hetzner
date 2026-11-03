@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
   pull-requests: read
+# TODO: cancelling a run mid `provider create` can leak Hetzner resources if the
+# always() cleanup outlasts the cancellation grace period. Add a scheduled
+# workflow that deletes test-* servers/volumes/SSH keys older than ~1h, or stop
+# cancelling e2e runs.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
