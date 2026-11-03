@@ -12,7 +12,9 @@ repos:
           - --no-sort-keys
       - id: check-json
       - id: check-yaml
-        exclude: ^hack
+        # hack: generated; cloud-config.yaml is a Go template whose conditional
+        # lines aren't YAML until rendered (the Go tests parse the rendered output)
+        exclude: ^(hack|pkg/hetzner/cloud-config\.yaml$)
         args:
           - --allow-multiple-documents
       - id: end-of-file-fixer
