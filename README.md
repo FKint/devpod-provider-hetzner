@@ -91,7 +91,7 @@ workspace with `devpod up <workspace> --provider-option KEY=VALUE`.
 
 | Option | Default | Effect |
 | --- | --- | --- |
-| `DISK_SIZE` | `40` | Size of the volume in GB. Raising it grows an existing volume and its filesystem on the next start; it never shrinks. |
+| `DISK_SIZE` | `40` | Size of the volume in GB. A larger value grows an existing volume and its filesystem the next time the server is created (the next start after a stop); it never shrinks. The default went from 30 to 40, so existing 30 GB volumes grow to 40 GB unless you set `DISK_SIZE`. On ext4 volumes the root-reserved blocks are also cut from 5% to 1%. |
 | `VOLUME_FORMAT` | `xfs` | Filesystem of a newly created volume (`xfs` or `ext4`); existing volumes keep theirs. XFS handled small synced writes 1.8× faster than ext4 on the volume, has no fixed inode limit, and supports file clones (`UV_LINK_MODE=clone` between two mounts). |
 | `PERSIST_DOCKER` | `true` | Keep Docker's images, containers, named volumes and build cache on the volume. With `false` they live on the server's local disk (faster, but lost on every stop). |
 | `CONTAINERD_IMAGE_STORE` | `true` | Use Docker's containerd image store. Switching it on an existing machine hides the other store's images and containers; they are rebuilt on the next start. |

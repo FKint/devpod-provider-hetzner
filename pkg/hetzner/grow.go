@@ -18,26 +18,32 @@ package hetzner
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 	"github.com/loft-sh/log"
 )
 
 // growVolume enlarges an existing volume to size GB if it is smaller (they never
-// shrink); the server grows the filesystem at boot. A failure only warns: the
-// machine still starts with the volume it has.
-func (h *Hetzner) growVolume(ctx context.Context, volume *hcloud.Volume, size int) {
+// shrink); the server grows the filesystem at boot. If Hetzner refuses the resize
+// it only warns and the machine starts with the volume it has. If a resize was
+// accepted but isn't confirmed, the volume may be locked, so it is an error.
+func (h *Hetzner) growVolume(ctx context.Context, volume *hcloud.Volume, size int) error {
 	if size <= volume.Size {
-		return
+		return nil
 	}
 
 	log.Default.Infof("Growing volume %s from %dGB to %dGB", volume.Name, volume.Size, size)
 
 	action, _, err := h.client.Volume.Resize(ctx, volume, size)
-	if err == nil {
-		err = h.waitForActions(ctx, action)
-	}
 	if err != nil {
 		log.Default.Warnf("Unable to grow volume %s to %dGB, continuing with %dGB: %v", volume.Name, size, volume.Size, err)
+		return nil
 	}
+
+	if err := h.waitForActions(ctx, action); err != nil {
+		return fmt.Errorf("growing volume %s to %dGB: %w", volume.Name, size, err)
+	}
+
+	return nil
 }

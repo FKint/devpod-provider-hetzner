@@ -24,7 +24,7 @@ import (
 )
 
 // MinDiskSizeGB is the smallest volume Hetzner allows. It only applies when a
-// volume is created; an existing volume is reused whatever DISK_SIZE says.
+// volume is created; an existing volume is only ever grown to DISK_SIZE.
 const MinDiskSizeGB = 10
 
 type Options struct {

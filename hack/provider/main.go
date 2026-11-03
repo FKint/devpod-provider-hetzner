@@ -247,8 +247,8 @@ fi`,
 				Local:       true,
 			},
 			"DISK_SIZE": {
-				Description: "The volume size in GB. Raising it grows an existing volume (and its filesystem) on the next start; " +
-					"it never shrinks.",
+				Description: "The volume size in GB. Raising it grows an existing volume (and its filesystem) the next time the server " +
+					"is created, i.e. on the next start after a stop; it never shrinks.",
 				Default: "40",
 				Local:   true,
 				Mutable: true,

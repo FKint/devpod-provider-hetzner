@@ -188,8 +188,8 @@ func (h *Hetzner) Create(
 		return err
 	}
 	if existing != nil {
-		log.Default.Info("Server already exists: machine options (PERSIST_DOCKER, SWAP_SIZE, ...) and DISK_SIZE " +
-			"only apply when it is created, i.e. on the next start after a stop")
+		log.Default.Info("Server already exists: machine options (PERSIST_DOCKER, SWAP_SIZE, ...) and a larger DISK_SIZE " +
+			"only apply when the server is created, i.e. on the next start after a stop")
 		return h.startExisting(ctx, existing, privateKeyFile)
 	}
 
@@ -241,7 +241,9 @@ func (h *Hetzner) Create(
 
 		log.Default.Info("Volume successfully created")
 	} else {
-		h.growVolume(ctx, volume, diskSize)
+		if err := h.growVolume(ctx, volume, diskSize); err != nil {
+			return err
+		}
 	}
 
 	// Generate the config init
