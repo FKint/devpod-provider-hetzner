@@ -18,14 +18,14 @@ runcmd:
       sed,
       -i,
       -e,
-      "s/^PermitRootLogin yes/PermitRootLogin no/",
+      "s/^#\\?PermitRootLogin.*/PermitRootLogin no/",
       "/etc/ssh/sshd_config",
     ]
   - [service, sshd, restart]
   - [rm, -f, /root/.ssh/authorized_keys]
   # Secure UFW
   - ufw allow ssh
-  - ufw enable
+  - ufw --force enable
   # Install Docker
   - if docker ; then echo "Docker already installed"; else curl -fsSL https://get.docker.com | sh; fi
   - systemctl restart docker

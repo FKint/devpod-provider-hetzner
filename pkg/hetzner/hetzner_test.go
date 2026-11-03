@@ -67,3 +67,37 @@ func TestFingerPrintGenerate(t *testing.T) {
 		})
 	}
 }
+
+func TestSSHKeyName(t *testing.T) {
+	assert.Equal(t, "short-abcdefgh", sshKeyName("short", "ABCDEFGHIJKL"))
+
+	long := "devpod-a-very-long-workspace-name-1234"
+	name := sshKeyName(long, "ABCDEFGHIJKL")
+	assert.Equal(t, long[:maxSSHKeyNameIDLength]+"-abcdefgh", name)
+}
+
+func TestCloudInitStatus(t *testing.T) {
+	for out, wantDone := range map[string]bool{
+		"status: done\n":          true,
+		"status: degraded done\n": true,
+		"status: running\n":       false,
+		"status: error\n":         false,
+	} {
+		status, err := parseCloudInitStatus([]byte(out))
+		assert.NoError(t, err)
+		assert.Equal(t, wantDone, isCloudInitDone(status.Status), out)
+	}
+
+	assert.True(t, isCloudInitFailed("error"))
+	assert.False(t, isCloudInitFailed("running"))
+}
+
+func TestGenerateUserData(t *testing.T) {
+	buf, err := generateUserData("ssh-ed25519 AAAA test\n", 42)
+	assert.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "scsi-0HC_Volume_42")
+	assert.Contains(t, out, `- "ssh-ed25519 AAAA test"`)
+	assert.Contains(t, out, "ufw --force enable")
+}

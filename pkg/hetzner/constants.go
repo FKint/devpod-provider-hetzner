@@ -16,9 +16,24 @@
 
 package hetzner
 
+import "time"
+
 const (
-	labelMachineID           = "machineId"
-	maxServerConnectAttempts = 60
-	SSHUsername              = "devpod"
-	SSHPort                  = 22
+	labelMachineID = "machineId"
+	SSHUsername    = "devpod"
+	SSHPort        = 22
+
+	// maxSSHKeyNameIDLength is how much of the machine ID is used in an SSH key name.
+	maxSSHKeyNameIDLength = 24
+
+	// actionTimeout bounds how long we wait for Hetzner actions to complete.
+	// Server creation with attached volumes can exceed a minute on a busy API.
+	actionTimeout = 5 * time.Minute
+	// provisionTimeout bounds how long we wait for cloud-init (incl. the Docker
+	// install) to finish on a new server.
+	provisionTimeout = 10 * time.Minute
+	provisionPoll    = 2 * time.Second
+	// statusTimeout bounds how long the CLI waits for a machine to reach a status.
+	statusTimeout = 5 * time.Minute
+	statusPoll    = time.Second
 )

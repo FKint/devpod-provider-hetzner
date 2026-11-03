@@ -67,11 +67,7 @@ func (h *Hetzner) upsertPublicKey(ctx context.Context, publicKey, machineID stri
 	}
 
 	if sshKey == nil {
-		// Generate name
-		if len(machineID) >= 24 {
-			machineID = machineID[:24]
-		}
-		name := fmt.Sprintf("%s-%s", machineID, strings.ToLower(rand.Text()[:8]))
+		name := sshKeyName(machineID, rand.Text())
 
 		log.Default.Infof("Uploading SSH key: %s", name)
 
@@ -92,6 +88,16 @@ func (h *Hetzner) upsertPublicKey(ctx context.Context, publicKey, machineID stri
 	}
 
 	return sshKey, nil
+}
+
+// sshKeyName builds a unique SSH key name from the machine ID. Only the name is
+// truncated: the machineId label must keep the full ID so Delete can find the key.
+func sshKeyName(machineID, random string) string {
+	if len(machineID) > maxSSHKeyNameIDLength {
+		machineID = machineID[:maxSSHKeyNameIDLength]
+	}
+
+	return fmt.Sprintf("%s-%s", machineID, strings.ToLower(random[:8]))
 }
 
 func (h *Hetzner) BuildServerOptions(
@@ -164,14 +170,30 @@ func (h *Hetzner) BuildServerOptions(
 	}, new(string(publicKey)), privateKey, nil
 }
 
-func (h *Hetzner) Create(ctx context.Context, req *hcloud.ServerCreateOpts, diskSize int, publicKey string, privateKeyFile []byte) error {
+func (h *Hetzner) Create(
+	ctx context.Context,
+	req *hcloud.ServerCreateOpts,
+	diskSize int,
+	publicKey string,
+	privateKeyFile []byte,
+) (err error) {
 	log.Default.Info("Creating DevPod instance")
+
+	// The server may already exist (e.g. "start" on a machine that is powered off or still booting)
+	existing, err := h.GetByName(ctx, req.Name)
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		return h.startExisting(ctx, existing, privateKeyFile)
+	}
 
 	volume, err := h.volumeByName(ctx, req.Name)
 	if err != nil {
 		return err
 	}
 
+	createdVolume := false
 	if volume == nil {
 		// Create the volume as it doesn't exist
 		log.Default.Info("Creating a new volume")
@@ -188,18 +210,34 @@ func (h *Hetzner) Create(ctx context.Context, req *hcloud.ServerCreateOpts, disk
 			return err
 		}
 
+		volume = result.Volume
+		createdVolume = true
+
 		if err := h.waitForActions(ctx, append([]*hcloud.Action{result.Action}, result.NextActions...)...); err != nil {
 			log.Default.Errorf("Error in volume creation action: %s", err)
+			h.rollback(ctx, nil, volume)
 			return err
 		}
 
 		log.Default.Info("Volume successfully created")
-
-		volume = result.Volume
 	}
 
+	// Remove anything created by this call if it doesn't succeed. A volume that
+	// already existed holds the user's data, so it is never removed here.
+	var createdServer *hcloud.Server
+	defer func() {
+		if err == nil {
+			return
+		}
+		var rollbackVolume *hcloud.Volume
+		if createdVolume {
+			rollbackVolume = volume
+		}
+		h.rollback(context.WithoutCancel(ctx), createdServer, rollbackVolume)
+	}()
+
 	// Generate the config init
-	userData, err := generateUserData(req.Name, publicKey, volume.ID)
+	userData, err := generateUserData(publicKey, volume.ID)
 	if err != nil {
 		return err
 	}
@@ -219,6 +257,7 @@ func (h *Hetzner) Create(ctx context.Context, req *hcloud.ServerCreateOpts, disk
 	if err != nil {
 		return err
 	}
+	createdServer = server.Server
 
 	log.Default.Info("Server creation triggered")
 
@@ -229,34 +268,115 @@ func (h *Hetzner) Create(ctx context.Context, req *hcloud.ServerCreateOpts, disk
 
 	log.Default.Info("Server created - provisioning")
 
-	attempt := 0
-
-	for {
-		if attempt >= maxServerConnectAttempts {
-			return fmt.Errorf("exceeded attempts to connect to server: %d", attempt)
-		}
-		attempt++
-		log.Default.Debugf("Attempt %d of %d", attempt, maxServerConnectAttempts)
-
-		time.Sleep(time.Second)
-
-		status := attemptConnection(ctx, server, privateKeyFile)
-
-		if status != nil && status.Status == "done" {
-			// The server is ready
-			break
-		}
-
-		log.Default.Debug("Server not yet provisioned")
-	}
-
-	log.Default.Info("Server provisioned")
-
-	return nil
+	return waitForProvisioned(ctx, server.Server, privateKeyFile)
 }
 
+// startExisting brings an already existing server to the provisioned state.
+func (h *Hetzner) startExisting(ctx context.Context, server *hcloud.Server, privateKeyFile []byte) error {
+	if server.Status == hcloud.ServerStatusOff {
+		log.Default.Info("Server exists but is powered off - powering on")
+
+		action, _, err := h.client.Server.Poweron(ctx, server)
+		if err != nil {
+			return fmt.Errorf("power on server: %w", err)
+		}
+		if err := h.waitForActions(ctx, action); err != nil {
+			return err
+		}
+	} else {
+		log.Default.Infof("Server already exists (status: %s)", server.Status)
+	}
+
+	return waitForProvisioned(ctx, server, privateKeyFile)
+}
+
+// rollback removes resources created by a failed Create. Failures are logged, not returned,
+// so the original error is what the caller sees.
+func (h *Hetzner) rollback(ctx context.Context, server *hcloud.Server, volume *hcloud.Volume) {
+	if server != nil {
+		log.Default.Warnf("Rolling back: deleting server %s", server.Name)
+
+		result, _, err := h.client.Server.DeleteWithResult(ctx, server)
+		if err == nil {
+			err = h.waitForActions(ctx, result.Action)
+		}
+		if err != nil {
+			log.Default.Errorf("Unable to delete server %s, please remove it manually: %v", server.Name, err)
+			// The volume can't be removed while attached to the server
+			return
+		}
+	}
+
+	if volume != nil {
+		log.Default.Warnf("Rolling back: deleting volume %s", volume.Name)
+
+		if _, err := h.client.Volume.Delete(ctx, volume); err != nil {
+			log.Default.Errorf("Unable to delete volume %s, please remove it manually: %v", volume.Name, err)
+		}
+	}
+}
+
+// waitForProvisioned polls cloud-init over SSH until it reports success, fails or the timeout expires.
+func waitForProvisioned(ctx context.Context, server *hcloud.Server, privateKeyFile []byte) error {
+	ctx, cancel := context.WithTimeout(ctx, provisionTimeout)
+	defer cancel()
+
+	for attempt := 1; ; attempt++ {
+		log.Default.Debugf("Provisioning check %d", attempt)
+
+		status := attemptConnection(ctx, server.PublicNet.IPv4.IP.String(), privateKeyFile)
+		switch {
+		case status == nil:
+			// Not reachable yet
+		case isCloudInitDone(status.Status):
+			log.Default.Info("Server provisioned")
+			return nil
+		case isCloudInitFailed(status.Status):
+			return fmt.Errorf("%w: cloud-init status %q", ErrProvisioningFailed, status.Status)
+		default:
+			log.Default.Debug("Server not yet provisioned")
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for server to be provisioned: %w", ctx.Err())
+		case <-time.After(provisionPoll):
+		}
+	}
+}
+
+func isCloudInitDone(status string) bool {
+	// "degraded done" means cloud-init finished with recoverable errors
+	return status == "done" || status == "degraded done"
+}
+
+func isCloudInitFailed(status string) bool {
+	return status == "error" || status == "disabled"
+}
+
+// Delete removes the server, then its volume and SSH keys.
 func (h *Hetzner) Delete(ctx context.Context, name string) error {
-	// Delete SSH key
+	// The server goes first: a volume can't be deleted while attached, and
+	// deleting the server detaches it without hot-unplugging a mounted disk.
+	server, err := h.GetByName(ctx, name)
+	if err != nil {
+		return err
+	}
+	if server != nil {
+		result, _, err := h.client.Server.DeleteWithResult(ctx, server)
+		if err != nil {
+			return err
+		}
+		if err := h.waitForActions(ctx, result.Action); err != nil {
+			return err
+		}
+	}
+
+	if err := h.deleteVolume(ctx, name); err != nil {
+		return err
+	}
+
+	// Delete SSH keys
 	keys, _, err := h.client.SSHKey.List(ctx, hcloud.SSHKeyListOpts{
 		ListOpts: hcloud.ListOpts{
 			LabelSelector: fmt.Sprintf("%s=%s", labelMachineID, name),
@@ -268,30 +388,12 @@ func (h *Hetzner) Delete(ctx context.Context, name string) error {
 
 	for _, k := range keys {
 		log.Default.Infof("Deleting SSH key: %s", k.Name)
-		_, err = h.client.SSHKey.Delete(ctx, k)
-		if err != nil {
+		if _, err := h.client.SSHKey.Delete(ctx, k); err != nil {
 			return err
 		}
 	}
 
-	// Delete volume
-	if err := h.deleteVolume(ctx, name); err != nil {
-		return err
-	}
-
-	server, err := h.GetByName(ctx, name)
-	if err != nil {
-		return err
-	} else if server == nil {
-		return nil
-	}
-
-	result, _, err := h.client.Server.DeleteWithResult(ctx, server)
-	if err != nil {
-		return err
-	}
-
-	return h.waitForActions(ctx, result.Action)
+	return nil
 }
 
 func (h *Hetzner) GetByName(ctx context.Context, name string) (*hcloud.Server, error) {
@@ -320,7 +422,7 @@ func (h *Hetzner) Init(ctx context.Context) error {
 }
 
 func (h *Hetzner) Status(ctx context.Context, name string) (client.Status, error) {
-	server, _, err := h.client.Server.GetByName(ctx, name)
+	server, err := h.GetByName(ctx, name)
 	if err != nil {
 		return client.StatusNotFound, err
 	}
@@ -336,12 +438,36 @@ func (h *Hetzner) Status(ctx context.Context, name string) (client.Status, error
 		return client.StatusNotFound, nil
 	}
 
-	// Is it busy?
-	if server.Status != hcloud.ServerStatusRunning {
+	switch server.Status {
+	case hcloud.ServerStatusRunning:
+		return client.StatusRunning, nil
+	case hcloud.ServerStatusOff:
+		return client.StatusStopped, nil
+	default:
+		// Starting, stopping, migrating, etc.
 		return client.StatusBusy, nil
 	}
+}
 
-	return client.StatusRunning, nil
+// WaitForStatus polls until the machine reaches the wanted status or the timeout expires.
+func (h *Hetzner) WaitForStatus(ctx context.Context, name string, want client.Status) error {
+	ctx, cancel := context.WithTimeout(ctx, statusTimeout)
+	defer cancel()
+
+	for {
+		status, err := h.Status(ctx, name)
+		if err != nil {
+			return fmt.Errorf("retrieving server status: %w", err)
+		} else if status == want {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for status %q (currently %q): %w", want, status, ctx.Err())
+		case <-time.After(statusPoll):
+		}
+	}
 }
 
 func (h *Hetzner) Stop(ctx context.Context, name string) error {
@@ -365,8 +491,12 @@ func (h *Hetzner) deleteVolume(ctx context.Context, name string) error {
 	volume, err := h.volumeByName(ctx, name)
 	if err != nil {
 		return err
-	} else if volume != nil && volume.Server != nil {
-		// Detatch volume
+	} else if volume == nil {
+		return nil
+	}
+
+	if volume.Server != nil {
+		// Detach volume
 		action, _, err := h.client.Volume.Detach(ctx, volume)
 		if err != nil {
 			return fmt.Errorf("detach volume: %w", err)
@@ -376,27 +506,29 @@ func (h *Hetzner) deleteVolume(ctx context.Context, name string) error {
 			log.Default.Errorf("Error in volume detach action: %s, %s", action.Command, err)
 			return err
 		}
-	}
 
-	// Wait until the volume is detached
-	for {
-		time.Sleep(time.Second)
+		// Wait until the volume is detached
+		waitCtx, cancel := context.WithTimeout(ctx, actionTimeout)
+		defer cancel()
 
-		// re-get volume
-		volume, err = h.volumeByName(ctx, name)
-		if err != nil {
-			return err
-		} else if volume == nil || volume.Server == nil {
-			break
+		for volume.Server != nil {
+			select {
+			case <-waitCtx.Done():
+				return fmt.Errorf("waiting for volume to detach: %w", waitCtx.Err())
+			case <-time.After(time.Second):
+			}
+
+			volume, err = h.volumeByName(waitCtx, name)
+			if err != nil {
+				return err
+			} else if volume == nil {
+				return nil
+			}
 		}
 	}
 
-	// delete volume
-	if volume != nil {
-		_, err = h.client.Volume.Delete(ctx, volume)
-		if err != nil {
-			return fmt.Errorf("delete volume: %w", err)
-		}
+	if _, err := h.client.Volume.Delete(ctx, volume); err != nil {
+		return fmt.Errorf("delete volume: %w", err)
 	}
 
 	return nil
@@ -421,17 +553,19 @@ func (h *Hetzner) volumeByName(ctx context.Context, name string) (*hcloud.Volume
 	return volumes[0], nil
 }
 
-func attemptConnection(ctx context.Context, server hcloud.ServerCreateResult, privateKeyFile []byte) *cloudInit {
+func attemptConnection(ctx context.Context, addr string, privateKeyFile []byte) *cloudInit {
 	log.Default.Debug("Checking server provision status")
 
 	// Check the server is provisioned - this runs "ssh user@path cloud-init status"
-	sshClient, err := ssh.NewSSHClient(SSHUsername, fmt.Sprintf("%s:%d", server.Server.PublicNet.IPv4.IP, SSHPort), privateKeyFile)
+	sshClient, err := ssh.NewSSHClient(SSHUsername, fmt.Sprintf("%s:%d", addr, SSHPort), privateKeyFile)
 	if err != nil {
 		log.Default.Warnf("Unable to connect to server: %v", err)
 		return nil
 	}
 	defer func() {
-		err = sshClient.Close()
+		if err := sshClient.Close(); err != nil {
+			log.Default.Debugf("Error closing SSH connection: %v", err)
+		}
 	}()
 
 	buf := new(bytes.Buffer)
@@ -440,13 +574,22 @@ func attemptConnection(ctx context.Context, server hcloud.ServerCreateResult, pr
 		return nil
 	}
 
-	var status cloudInit
-	if err := yaml.Unmarshal(buf.Bytes(), &status); err != nil {
+	status, err := parseCloudInitStatus(buf.Bytes())
+	if err != nil {
 		log.Default.Errorf("Unable to parse cloud-init YAML: %v", err)
 		return nil
 	}
 
-	return &status
+	return status
+}
+
+func parseCloudInitStatus(out []byte) (*cloudInit, error) {
+	var status cloudInit
+	if err := yaml.Unmarshal(out, &status); err != nil {
+		return nil, err
+	}
+
+	return &status, nil
 }
 
 func generateSSHKeyFingerprint(publicKey string) (string, error) {
@@ -459,7 +602,7 @@ func generateSSHKeyFingerprint(publicKey string) (string, error) {
 	return cryptoSsh.FingerprintLegacyMD5(pk), nil
 }
 
-func generateUserData(_, publicKey string, volumeID int64) (*bytes.Buffer, error) {
+func generateUserData(publicKey string, volumeID int64) (*bytes.Buffer, error) {
 	t, err := template.New("cloud-config.yaml").ParseFS(cloudConfig, "cloud-config.yaml")
 	if err != nil {
 		return nil, err
@@ -476,10 +619,6 @@ func generateUserData(_, publicKey string, volumeID int64) (*bytes.Buffer, error
 
 	return buf, nil
 }
-
-// actionTimeout bounds how long we wait for Hetzner actions to complete.
-// Server creation with attached volumes can exceed a minute on a busy API.
-const actionTimeout = 5 * time.Minute
 
 // waitForActions blocks until all actions succeed, one fails, or the timeout/context expires.
 func (h *Hetzner) waitForActions(ctx context.Context, actions ...*hcloud.Action) error {
