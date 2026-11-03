@@ -39,6 +39,8 @@ type fakeAPI struct {
 	// attachedFor says how many volume lookups report the volume as attached to
 	// server 42 before it is released; negative means never.
 	attachedFor int
+	// errorsFirst is how many volume lookups fail with a server error before they succeed
+	errorsFirst int
 	// server42 is what GET /servers/42 returns: "" = not found, otherwise its status
 	server42 string
 
@@ -50,6 +52,11 @@ func (f *fakeAPI) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/volumes", func(w http.ResponseWriter, _ *http.Request) {
 		n := int(f.volumeCalls.Add(1))
+		if n <= f.errorsFirst {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		n -= f.errorsFirst
 		vol := map[string]any{"id": 7, "name": "machine", "size": 40, "server": nil}
 		if f.attachedFor < 0 || n <= f.attachedFor {
 			vol["server"] = 42
@@ -159,4 +166,18 @@ func TestStatusBusyUntilVolumeReleased(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
+}
+
+func TestWaitForVolumeDetachedRetriesTransientErrors(t *testing.T) {
+	api := &fakeAPI{errorsFirst: 3, attachedFor: 1}
+	vol, err := api.hetzner(t).waitForVolumeDetached(context.Background(), "machine")
+	assert.NoError(t, err)
+	assert.NotNil(t, vol)
+}
+
+func TestWaitForVolumeDetachedGivesUpOnPersistentErrors(t *testing.T) {
+	api := &fakeAPI{errorsFirst: 100}
+	_, err := api.hetzner(t).waitForVolumeDetached(context.Background(), "machine")
+	assert.Error(t, err)
+	assert.Equal(t, int32(detachCheckRetries+1), api.volumeCalls.Load())
 }

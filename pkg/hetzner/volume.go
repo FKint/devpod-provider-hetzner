@@ -41,13 +41,17 @@ func (h *Hetzner) attachedLiveServer(ctx context.Context, volume *hcloud.Volume)
 	return server, nil
 }
 
+// detachCheckRetries is how many API errors in a row end the wait.
+const detachCheckRetries = 5
+
 // waitForVolumeDetached returns the named volume once no server holds it any
 // more (nil if there is no such volume). Creating a server with a volume that is
 // still attached fails with "volume already attached", which happens right after
 // a stop because the server delete completes before the detach does.
 //
 // A volume attached to a server that is still alive is not waited for: it
-// belongs to something else, and waiting would not help.
+// belongs to something else, and waiting would not help. A few transient API
+// errors are retried.
 func (h *Hetzner) waitForVolumeDetached(ctx context.Context, name string) (*hcloud.Volume, error) {
 	ctx, cancel := context.WithTimeout(ctx, volumeDetachTimeout)
 	defer cancel()
@@ -57,24 +61,27 @@ func (h *Hetzner) waitForVolumeDetached(ctx context.Context, name string) (*hclo
 		poll = statusPoll
 	}
 
-	logged := false
+	logged, failures := false, 0
 	for {
-		volume, err := h.volumeByName(ctx, name)
-		if err != nil || volume == nil || volume.Server == nil {
-			return volume, err
-		}
-
-		live, err := h.attachedLiveServer(ctx, volume)
-		if err != nil {
+		volume, live, err := h.volumeAndHolder(ctx, name)
+		switch {
+		case err != nil && ctx.Err() == nil && failures < detachCheckRetries:
+			failures++
+			log.Default.Warnf("Error checking volume %s, retrying: %v", name, err)
+		case err != nil && ctx.Err() != nil:
+			return nil, fmt.Errorf("waiting for volume %s to detach: %w", name, ctx.Err())
+		case err != nil:
 			return nil, err
-		}
-		if live != nil {
+		case volume == nil || volume.Server == nil:
+			return volume, nil
+		case live != nil:
 			return nil, fmt.Errorf("%w: volume %s is attached to server %s", ErrVolumeAttached, name, live.Name)
-		}
-
-		if !logged {
-			log.Default.Infof("Waiting for volume %s to detach from the previous server", name)
-			logged = true
+		default:
+			failures = 0
+			if !logged {
+				log.Default.Infof("Waiting for volume %s to detach from the previous server", name)
+				logged = true
+			}
 		}
 
 		select {
@@ -83,4 +90,16 @@ func (h *Hetzner) waitForVolumeDetached(ctx context.Context, name string) (*hclo
 		case <-time.After(poll):
 		}
 	}
+}
+
+// volumeAndHolder looks up the volume and, if it is attached, the live server holding it.
+func (h *Hetzner) volumeAndHolder(ctx context.Context, name string) (*hcloud.Volume, *hcloud.Server, error) {
+	volume, err := h.volumeByName(ctx, name)
+	if err != nil || volume == nil || volume.Server == nil {
+		return volume, nil, err
+	}
+
+	live, err := h.attachedLiveServer(ctx, volume)
+
+	return volume, live, err
 }
