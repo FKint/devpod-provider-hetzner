@@ -74,9 +74,13 @@ for OS in ${PROVIDER_BUILD_PLATFORMS[@]}; do
   done
 done
 
-# generate provider.yaml - this queries the Hetzner API so needs a token. Only
-# skip for development builds (eg, PRs from forks); releases must fail loudly
-if [[ -z "${HCLOUD_TOKEN}" && "${RELEASE_VERSION}" == "development" ]]; then
+# generate provider.yaml - this queries the Hetzner API so needs a token. CI sets
+# SKIP_PROVIDER_YAML=true and generates it in the publish job instead, so the
+# token is only exposed to the release environment. Otherwise only skip for
+# development builds (eg, local builds); releases must fail loudly
+if [[ "${SKIP_PROVIDER_YAML}" == "true" ]]; then
+  echo "SKIP_PROVIDER_YAML set - skipping provider.yaml generation"
+elif [[ -z "${HCLOUD_TOKEN}" && "${RELEASE_VERSION}" == "development" ]]; then
   echo "HCLOUD_TOKEN not set - skipping provider.yaml generation for development build"
 else
   go run "${PROVIDER_ROOT}/hack/provider/main.go" ${RELEASE_VERSION} > "${PROVIDER_ROOT}/dist/provider.yaml"
