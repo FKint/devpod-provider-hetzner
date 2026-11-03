@@ -162,7 +162,7 @@ func (h *Hetzner) BuildServerOptions(
 		SSHKeys: []*hcloud.SSHKey{
 			sshKey,
 		},
-	}, hcloud.Ptr(string(publicKey)), privateKey, nil
+	}, new(string(publicKey)), privateKey, nil
 }
 
 func (h *Hetzner) Create(ctx context.Context, req *hcloud.ServerCreateOpts, diskSize int, publicKey string, privateKeyFile []byte) error {
@@ -181,8 +181,8 @@ func (h *Hetzner) Create(ctx context.Context, req *hcloud.ServerCreateOpts, disk
 			Location:  req.Location,
 			Name:      req.Name,
 			Size:      diskSize,
-			Format:    hcloud.Ptr("ext4"),
-			Automount: hcloud.Ptr(false),
+			Format:    new("ext4"),
+			Automount: new(false),
 			Labels:    req.Labels,
 		})
 		if err != nil {
