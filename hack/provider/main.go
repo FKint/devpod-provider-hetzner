@@ -198,7 +198,7 @@ fi`,
 				Description: "If DevPod should inject git credentials into the remote host.",
 				Default:     "true",
 			},
-			"INJECT_DOCKER_CREDENTIALS": { //nolint:gosec // option name, not a credential
+			"INJECT_DOCKER_CREDENTIALS": {
 				Description: "If DevPod should inject docker credentials into the remote host.",
 				Default:     "true",
 			},
@@ -211,7 +211,7 @@ fi`,
 				Default:     "/home/devpod/.devpod/agent",
 			},
 		},
-		Agent: provider.ProviderAgentConfig{
+		Agent: provider.ProviderAgentConfig{ //nolint:gosec // field names, not credentials
 			Path:                    "${AGENT_PATH}",
 			DataPath:                "${AGENT_DATA_PATH}",
 			Timeout:                 "${INACTIVITY_TIMEOUT}",
