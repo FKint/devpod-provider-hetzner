@@ -39,16 +39,17 @@ runcmd:
   # Secure UFW
   - ufw allow ssh
   - ufw --force enable
+  # The volume holds the home directory and workspaces, and (PERSIST_DOCKER)
+  # all Docker and containerd state (see write_files). Stop (an explicit exit
+  # ends this script; other failures don't) rather than run Docker without it.
+  - mountpoint -q /home/{{ .Username }} || exit 1
   # Install Docker
   - if docker ; then echo "Docker already installed"; else curl -fsSL https://get.docker.com | sh; fi
-  # The volume holds the home directory and workspaces, and (PERSIST_DOCKER)
-  # all Docker and containerd state (see write_files). containerd can start
-  # before its drop-in is written, so restart both, containerd first. runcmd
-  # doesn't stop on errors, so fail provisioning explicitly instead.
-  - mountpoint -q /home/{{ .Username }} || exit 1
   # Grow the filesystem if the volume was enlarged (DISK_SIZE); a no-op otherwise.
   # ext4 volumes also get their root-reserved blocks cut from 5% to 1%.
-  - "case $(findmnt -n -o FSTYPE /home/{{ .Username }}) in xfs) xfs_growfs /home/{{ .Username }};; ext4) resize2fs /dev/disk/by-id/scsi-0HC_Volume_{{ .VolumeID }}; tune2fs -m 1 /dev/disk/by-id/scsi-0HC_Volume_{{ .VolumeID }};; esac || true"
+  - "case $(findmnt -n -o FSTYPE /home/{{ .Username }}) in xfs) xfs_growfs /home/{{ .Username }};; ext4) d=$(findmnt -n -o SOURCE /home/{{ .Username }}); resize2fs $d; tune2fs -m 1 $d;; esac || true"
+  # containerd can start before its drop-in is written, so restart both,
+  # containerd first
   - systemctl daemon-reload
   - systemctl restart containerd && systemctl restart docker || exit 1
   # Clean up before DevPod connects (it waits for cloud-init), so this can't
@@ -60,8 +61,9 @@ runcmd:
 {{- end }}
 {{- if .Machine.PruneAnonymousVolumes }}
   # Anonymous volumes only (named volumes are kept): "devpod up --recreate"
-  # removes the old container but not its anonymous volumes.
-  - docker volume prune --force || true
+  # removes the old container but not its anonymous volumes. Only from Docker 23
+  # on: older versions also remove unused named volumes.
+  - "docker info 2>/dev/null | awk -F'[ .]+' '/Server Version/ {exit !($4 >= 23)}' && docker volume prune --force || true"
 {{- end }}
   # Timer stamps don't survive a stop (the server is deleted), so the weekly
   # fstrim.timer would rarely run. Trim in the background instead.
@@ -123,7 +125,7 @@ write_files:
 
       [Service]
       ExecStart=
-      ExecStart=/usr/bin/containerd --root /home/{{ .Username }}/.devpod/containerd
+      ExecStart=/usr/bin/env containerd --root /home/{{ .Username }}/.devpod/containerd
 {{- end }}
   # Keep SSH sessions alive under memory pressure so the machine stays
   # reachable; the OOM killer picks container processes first. -900 rather

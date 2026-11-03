@@ -101,7 +101,7 @@ workspace with `devpod up <workspace> --provider-option KEY=VALUE`.
 | `SWAP_SIZE` | `8` | Swap file in GB on the local disk (also where a tmpfs `/tmp` spills to). `0` disables it. |
 | `CONTAINERS_MEMORY_HIGH` | `infinity` | All containers together are throttled above this: a percentage of RAM, a size (`6G`) or `infinity`. Left off on purpose: a container throttled below the hard limit, with swap full, hung for minutes instead of being killed. |
 | `CONTAINERS_MEMORY_MAX` | `90%` | Hard limit for all containers together; above it the OOM killer stops a container process (within seconds in testing). |
-| `CONTAINERS_SWAP_MAX` | `50%` | Swap all containers together may use, as a percentage of RAM, a size (`4G`) or `infinity`. Keeps swap for the host. |
+| `CONTAINERS_SWAP_MAX` | `4G` | Swap all containers together may use: a size or `infinity`. Keeps swap for the host. |
 
 #### Per-workspace settings
 

@@ -25,7 +25,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/FKint/devpod-provider-hetzner/pkg/options"
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 	"github.com/stretchr/testify/assert"
 )
@@ -107,16 +106,11 @@ func TestGenerateUserDataGrowsFilesystem(t *testing.T) {
 		return
 	}
 	line := cfg.RunCmd[grow]
-	assert.Contains(t, line, "resize2fs /dev/disk/by-id/scsi-0HC_Volume_1234")
-	assert.Contains(t, line, "tune2fs -m 1 /dev/disk/by-id/scsi-0HC_Volume_1234")
+	assert.Contains(t, line, "resize2fs $d")
+	assert.Contains(t, line, "tune2fs -m 1 $d")
 	assert.True(t, strings.HasSuffix(line, "|| true"), "growing must never fail provisioning")
 
 	// After the volume is mounted, before Docker starts using it
 	assert.Less(t, runCmdIndex(cfg.RunCmd, "mountpoint -q /home/devpod"), grow)
 	assert.Less(t, grow, runCmdIndex(cfg.RunCmd, "systemctl restart containerd"))
-}
-
-func TestMachineVolumeFormatDefault(t *testing.T) {
-	assert.Equal(t, options.DefaultVolumeFormat, defaultMachine(t).VolumeFormat)
-	assert.Equal(t, "xfs", options.DefaultVolumeFormat)
 }

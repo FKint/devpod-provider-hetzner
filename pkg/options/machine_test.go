@@ -23,6 +23,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+const infinity = "infinity"
+
 var allMachineEnvs = []string{
 	EnvPersistDocker, EnvContainerdImageStore, EnvBuildCacheSize, EnvPruneImagesAfter,
 	EnvPruneAnonymousVolumes, EnvSwapSize, EnvContainersMemoryHigh, EnvContainersMemoryMax, EnvContainersSwapMax,
@@ -49,9 +51,9 @@ func TestMachineFromEnvDefaults(t *testing.T) {
 		PruneAnonymousVolumes: true,
 		VolumeFormat:          "xfs",
 		SwapSizeBytes:         8 << 30,
-		ContainersMemoryHigh:  "infinity",
+		ContainersMemoryHigh:  infinity,
 		ContainersMemoryMax:   "90%",
-		ContainersSwapMax:     "50%",
+		ContainersSwapMax:     "4G",
 	}, m)
 }
 
@@ -64,7 +66,7 @@ func TestMachineFromEnvOverrides(t *testing.T) {
 	t.Setenv(EnvPruneAnonymousVolumes, "false")
 	t.Setenv(EnvSwapSize, "0")
 	t.Setenv(EnvContainersMemoryHigh, "6G")
-	t.Setenv(EnvContainersMemoryMax, "infinity")
+	t.Setenv(EnvContainersMemoryMax, infinity)
 	t.Setenv(EnvContainersSwapMax, "2G")
 	t.Setenv(EnvVolumeFormat, "ext4")
 
@@ -74,7 +76,7 @@ func TestMachineFromEnvOverrides(t *testing.T) {
 		BuildCacheSize:       "500MB",
 		VolumeFormat:         "ext4",
 		ContainersMemoryHigh: "6G",
-		ContainersMemoryMax:  "infinity",
+		ContainersMemoryMax:  infinity,
 		ContainersSwapMax:    "2G",
 	}, m)
 }
@@ -84,13 +86,14 @@ func TestMachineFromEnvInvalid(t *testing.T) {
 		EnvPersistDocker:         {"yes please"},
 		EnvContainerdImageStore:  {"maybe"},
 		EnvBuildCacheSize:        {"5", "5 GB", "5GiB", "-1GB", "5GB; rm -rf /"},
-		EnvPruneImagesAfter:      {"7d", "0", "-1h", "1h || true"},
+		EnvPruneImagesAfter:      {"7d", "0", "-1h", "1h || true", "+168h", "1h30m5ms", "1\u00b5s"},
 		EnvPruneAnonymousVolumes: {"2"},
 		EnvSwapSize:              {"-1", "8G", "1000"},
-		EnvContainersMemoryHigh:  {"85", "101%", "6GB", "6G\nMemoryMax=1"},
+		EnvContainersMemoryHigh:  {"85", "101%", "6GB", "6G\nMemoryMax=1", "0%", "0G", "85.555%"},
 		EnvContainersMemoryMax:   {"lots"},
-		EnvContainersSwapMax:     {"half"},
-		EnvVolumeFormat:          {"btrfs", "XFS", "xfs;"},
+		// A percentage is not scaled by RAM for swap, so only sizes are accepted
+		EnvContainersSwapMax: {"half", "50%", "0G"},
+		EnvVolumeFormat:      {"btrfs", "XFS", "xfs;"},
 	} {
 		for _, v := range values {
 			clearMachineEnv(t)
@@ -112,9 +115,10 @@ func TestMachinePatterns(t *testing.T) {
 		PatternWholeNumber:  {DefaultSwapSize: true, "0": true, "8G": false, "-1": false},
 		PatternVolumeFormat: {"xfs": true, "ext4": true, "btrfs": false, "xfs ext4": false},
 		PatternSystemdMemory: {
-			DefaultContainersMemoryHigh: true, DefaultContainersMemoryMax: true, DefaultContainersSwapMax: true,
-			"6G": true, "85": false,
+			DefaultContainersMemoryHigh: true, DefaultContainersMemoryMax: true, "6G": true, "85.25%": true,
+			"85": false, "85.255%": false,
 		},
+		PatternSystemdSize: {DefaultContainersSwapMax: true, infinity: true, "50%": false, "4": false},
 	} {
 		re := regexp.MustCompile(pattern)
 		for v, want := range values {

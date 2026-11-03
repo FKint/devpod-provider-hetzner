@@ -188,6 +188,8 @@ func (h *Hetzner) Create(
 		return err
 	}
 	if existing != nil {
+		log.Default.Info("Server already exists: machine options (PERSIST_DOCKER, SWAP_SIZE, ...) and DISK_SIZE " +
+			"only apply when it is created, i.e. on the next start after a stop")
 		return h.startExisting(ctx, existing, privateKeyFile)
 	}
 
@@ -724,7 +726,7 @@ type userDataParams struct {
 }
 
 func generateUserData(publicKey string, volumeID int64, machine *options.Machine) (*bytes.Buffer, error) {
-	t, err := template.New("cloud-config.yaml").Option("missingkey=error").ParseFS(cloudConfig, "cloud-config.yaml")
+	t, err := template.New("cloud-config.yaml").ParseFS(cloudConfig, "cloud-config.yaml")
 	if err != nil {
 		return nil, err
 	}

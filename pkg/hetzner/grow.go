@@ -23,11 +23,9 @@ import (
 	"github.com/loft-sh/log"
 )
 
-// growVolume enlarges an existing volume to size GB if it is smaller, so a bigger
-// DISK_SIZE applies to a machine that already has its volume. Hetzner volumes
-// can't shrink, so a larger volume is left alone. The filesystem is grown on the
-// server (see cloud-config.yaml). A failure is not fatal: the machine still starts
-// with the volume it has.
+// growVolume enlarges an existing volume to size GB if it is smaller (they never
+// shrink); the server grows the filesystem at boot. A failure only warns: the
+// machine still starts with the volume it has.
 func (h *Hetzner) growVolume(ctx context.Context, volume *hcloud.Volume, size int) {
 	if size <= volume.Size {
 		return

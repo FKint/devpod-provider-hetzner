@@ -54,15 +54,14 @@ const (
 	// never reached MemoryMax to be killed.
 	DefaultContainersMemoryHigh = "infinity"
 	DefaultContainersMemoryMax  = "90%"
-	// Percentage of RAM; keeps part of the swap for the host and makes a runaway
-	// container hit MemoryMax (and get OOM-killed) within seconds.
-	DefaultContainersSwapMax = "50%"
+	// Keeps part of the swap for the host and makes a runaway container hit
+	// MemoryMax (and get OOM-killed) within seconds. A size, not a percentage:
+	// systemd documents percentages of RAM for MemoryMax, not for MemorySwapMax.
+	DefaultContainersSwapMax = "4G"
 )
 
-// DefaultVolumeFormat is the filesystem of newly created volumes. XFS beat ext4
-// on the Cloud Volume in testing (about 1.8x the synced small-write rate, a much
-// better read tail latency), has no fixed inode limit, and supports reflinks,
-// which make uv's clone mode work between mounts.
+// DefaultVolumeFormat is the filesystem of newly created volumes: no inode limit and
+// reflink support (uv's clone mode); the numbers are in the README.
 const DefaultVolumeFormat = "xfs"
 
 // PruneNever disables the image prune at start.
@@ -75,17 +74,24 @@ const maxSwapSizeGB = 256
 // rejects bad values before the provider runs.
 const (
 	PatternDockerSize = `^(?i)\d+(\.\d+)?(B|KB|MB|GB|TB)$`
-	// A percentage of RAM, a size with a K/M/G/T suffix, or infinity. Bare
-	// byte counts are refused: "85" is almost surely meant as 85%.
-	PatternSystemdMemory = `^(\d+(\.\d+)?%|\d+[KMGT]|infinity)$`
-	PatternPruneAge      = `^((?i)never|(\d+(\.\d+)?(h|m|s))+)$`
-	PatternWholeNumber   = `^\d+$`
-	PatternVolumeFormat  = `^(xfs|ext4)$`
+	// A percentage of RAM (at most two decimals, what systemd parses), a size with
+	// a K/M/G/T suffix, or infinity. Bare byte counts are refused: "85" is almost
+	// surely meant as 85%.
+	PatternSystemdMemory = `^(\d+(\.\d{1,2})?%|\d+[KMGT]|infinity)$`
+	// A size or infinity, for limits that systemd does not scale by RAM
+	PatternSystemdSize = `^(\d+[KMGT]|infinity)$`
+	PatternPruneAge    = `^((?i)never|(\d+(\.\d+)?[hms])+)$`
+	PatternWholeNumber = `^\d+$`
+	// The filesystem of a new volume
+	PatternVolumeFormat = `^(xfs|ext4)$`
 )
 
 var (
 	dockerSizeRe    = regexp.MustCompile(PatternDockerSize)
 	systemdMemoryRe = regexp.MustCompile(PatternSystemdMemory)
+	systemdSizeRe   = regexp.MustCompile(PatternSystemdSize)
+	pruneAgeRe      = regexp.MustCompile(PatternPruneAge)
+	volumeFormatRe  = regexp.MustCompile(PatternVolumeFormat)
 )
 
 // Machine is the validated machine-level configuration used to render the
@@ -117,78 +123,105 @@ type Machine struct {
 	ContainersSwapMax    string
 }
 
+// envParser reads options from the environment and collects every problem.
+type envParser struct{ errs []string }
+
+func (p *envParser) fail(name, value, want string) {
+	p.errs = append(p.errs, fmt.Sprintf("%s=%q: %s", name, value, want))
+}
+
+func (p *envParser) get(name, def string) string {
+	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+		return v
+	}
+	return def
+}
+
+func (p *envParser) boolean(name, def string) bool {
+	v := p.get(name, def)
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		p.fail(name, v, "want true or false")
+	}
+	return b
+}
+
+// pattern returns the value if it matches re and records an error otherwise.
+func (p *envParser) pattern(name, def string, re *regexp.Regexp, want string) (string, bool) {
+	v := p.get(name, def)
+	if !re.MatchString(v) {
+		p.fail(name, v, want)
+		return v, false
+	}
+	return v, true
+}
+
+// limit reads a systemd memory limit.
+func (p *envParser) limit(name, def string, re *regexp.Regexp, want string) string {
+	v, ok := p.pattern(name, def, re, want)
+	if !ok || v == "infinity" {
+		return v
+	}
+	// The patterns guarantee a number. 0 would make every container fail on its first allocation.
+	n, _ := strconv.ParseFloat(strings.TrimRight(v, "%KMGT"), 64)
+	switch {
+	case n == 0:
+		p.fail(name, v, "must be above 0 (use infinity for no limit)")
+	case strings.HasSuffix(v, "%") && n > 100:
+		p.fail(name, v, "a percentage can't exceed 100%")
+	}
+
+	return v
+}
+
+// pruneAge reads PRUNE_IMAGES_AFTER; "never" becomes "".
+func (p *envParser) pruneAge() string {
+	v, ok := p.pattern(EnvPruneImagesAfter, DefaultPruneImagesAfter, pruneAgeRe, "want a duration such as 168h, or never")
+	switch {
+	case !ok:
+		return v
+	case strings.EqualFold(v, PruneNever):
+		return ""
+	}
+	if d, err := time.ParseDuration(v); err != nil || d <= 0 {
+		p.fail(EnvPruneImagesAfter, v, "want a duration such as 168h, or never")
+	}
+
+	return v
+}
+
+func (p *envParser) swapBytes() int64 {
+	v := p.get(EnvSwapSize, DefaultSwapSize)
+	gb, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || gb < 0 || gb > maxSwapSizeGB {
+		p.fail(EnvSwapSize, v, fmt.Sprintf("want whole GB between 0 (no swap) and %d", maxSwapSizeGB))
+		return 0
+	}
+
+	return gb << 30
+}
+
 // MachineFromEnv reads and validates the machine options. Unset options get
 // their defaults, so an older provider.yaml without them keeps working.
 func MachineFromEnv() (Machine, error) {
-	var (
-		m    Machine
-		errs []string
-		err  error
-	)
-	get := func(name, def string) string {
-		if v := strings.TrimSpace(os.Getenv(name)); v != "" {
-			return v
-		}
-		return def
-	}
-	fail := func(name, value, want string) {
-		errs = append(errs, fmt.Sprintf("%s=%q: %s", name, value, want))
-	}
+	const ramLimit = "want a percentage of RAM (85%), a size (6G) or infinity"
 
-	parseBool := func(name, def string) bool {
-		v := get(name, def)
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			fail(name, v, "want true or false")
-		}
-		return b
+	var p envParser
+	m := Machine{
+		PersistDocker:         p.boolean(EnvPersistDocker, DefaultPersistDocker),
+		ContainerdImageStore:  p.boolean(EnvContainerdImageStore, DefaultContainerdImageStore),
+		PruneAnonymousVolumes: p.boolean(EnvPruneAnonymousVolumes, DefaultPruneAnonymousVolumes),
+		PruneImagesAfter:      p.pruneAge(),
+		SwapSizeBytes:         p.swapBytes(),
+		ContainersMemoryHigh:  p.limit(EnvContainersMemoryHigh, DefaultContainersMemoryHigh, systemdMemoryRe, ramLimit),
+		ContainersMemoryMax:   p.limit(EnvContainersMemoryMax, DefaultContainersMemoryMax, systemdMemoryRe, ramLimit),
+		ContainersSwapMax:     p.limit(EnvContainersSwapMax, DefaultContainersSwapMax, systemdSizeRe, "want a size (4G) or infinity"),
 	}
-	m.PersistDocker = parseBool(EnvPersistDocker, DefaultPersistDocker)
-	m.ContainerdImageStore = parseBool(EnvContainerdImageStore, DefaultContainerdImageStore)
-	m.PruneAnonymousVolumes = parseBool(EnvPruneAnonymousVolumes, DefaultPruneAnonymousVolumes)
+	m.BuildCacheSize, _ = p.pattern(EnvBuildCacheSize, DefaultBuildCacheSize, dockerSizeRe, "want a size such as 5GB or 500MB")
+	m.VolumeFormat, _ = p.pattern(EnvVolumeFormat, DefaultVolumeFormat, volumeFormatRe, "want xfs or ext4")
 
-	m.BuildCacheSize = get(EnvBuildCacheSize, DefaultBuildCacheSize)
-	if !dockerSizeRe.MatchString(m.BuildCacheSize) {
-		fail(EnvBuildCacheSize, m.BuildCacheSize, "want a size such as 5GB or 500MB")
-	}
-
-	m.PruneImagesAfter = get(EnvPruneImagesAfter, DefaultPruneImagesAfter)
-	if strings.EqualFold(m.PruneImagesAfter, PruneNever) {
-		m.PruneImagesAfter = ""
-	} else if d, perr := time.ParseDuration(m.PruneImagesAfter); perr != nil || d <= 0 {
-		fail(EnvPruneImagesAfter, m.PruneImagesAfter, "want a duration such as 168h, or never")
-	}
-
-	m.VolumeFormat = get(EnvVolumeFormat, DefaultVolumeFormat)
-	if !regexp.MustCompile(PatternVolumeFormat).MatchString(m.VolumeFormat) {
-		fail(EnvVolumeFormat, m.VolumeFormat, "want xfs or ext4")
-	}
-
-	swap := get(EnvSwapSize, DefaultSwapSize)
-	var swapGB int64
-	if swapGB, err = strconv.ParseInt(swap, 10, 64); err != nil || swapGB < 0 || swapGB > maxSwapSizeGB {
-		fail(EnvSwapSize, swap, fmt.Sprintf("want whole GB between 0 (no swap) and %d", maxSwapSizeGB))
-	} else {
-		m.SwapSizeBytes = swapGB << 30
-	}
-
-	parseMemory := func(name, def string) string {
-		v := get(name, def)
-		if !systemdMemoryRe.MatchString(v) {
-			fail(name, v, "want a percentage of RAM (85%), a size (6G) or infinity")
-		} else if pct, ok := strings.CutSuffix(v, "%"); ok {
-			if p, _ := strconv.ParseFloat(pct, 64); p > 100 {
-				fail(name, v, "a percentage can't exceed 100%")
-			}
-		}
-		return v
-	}
-	m.ContainersMemoryHigh = parseMemory(EnvContainersMemoryHigh, DefaultContainersMemoryHigh)
-	m.ContainersMemoryMax = parseMemory(EnvContainersMemoryMax, DefaultContainersMemoryMax)
-	m.ContainersSwapMax = parseMemory(EnvContainersSwapMax, DefaultContainersSwapMax)
-
-	if len(errs) > 0 {
-		return Machine{}, fmt.Errorf("invalid machine options: %s", strings.Join(errs, "; "))
+	if len(p.errs) > 0 {
+		return Machine{}, fmt.Errorf("invalid machine options: %s", strings.Join(p.errs, "; "))
 	}
 
 	return m, nil
