@@ -21,7 +21,7 @@ created by Simon Emms. All credit for the original work goes to the original aut
   * [Open in a container](#open-in-a-container)
   * [Commit style](#commit-style)
 
-<!-- Regenerate with "pre-commit run -a markdown-toc" -->
+<!-- Update this table of contents by hand when headings change -->
 
 <!-- tocstop -->
 
