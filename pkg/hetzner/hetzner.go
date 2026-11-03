@@ -722,7 +722,7 @@ type userDataParams struct {
 }
 
 func generateUserData(publicKey string, volumeID int64, machine *options.Machine) (*bytes.Buffer, error) {
-	t, err := template.New("cloud-config.yaml").Option("missingkey=error").ParseFS(cloudConfig, "cloud-config.yaml")
+	t, err := template.New("cloud-config.yaml").ParseFS(cloudConfig, "cloud-config.yaml")
 	if err != nil {
 		return nil, err
 	}
