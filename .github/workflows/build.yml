@@ -81,9 +81,9 @@ jobs:
       DISK_SIZE: "30"
       MACHINE_ID: test-${{ github.run_id }}
       MACHINE_FOLDER: ${{ github.workspace }}/.ssh
-      MACHINE_TYPE: "cx22"
+      MACHINE_TYPE: "cpx22"
       REGION: "nbg1"
-      SSH_KEY_PUB: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2sB1n570BgGJ3+I0Dgzxhlf9ukc+Hp+C/zsIH4J8Xm vscode@df47ba471beb"
+      SSH_KEY_PUB: ${{ secrets.SSH_KEY_PUB }}
       SSH_KEY: ${{ secrets.SSH_KEY }}
     steps:
       - uses: actions/checkout@v4
@@ -92,8 +92,8 @@ jobs:
       # are a misconfiguration and must fail rather than silently skip e2e.
       - name: Check e2e secrets
         run: |
-          if [ -z "${HCLOUD_TOKEN}" ] || [ -z "${SSH_KEY}" ]; then
-            echo "::error::HCLOUD_TOKEN and SSH_KEY secrets are required to run e2e"
+          if [ -z "${HCLOUD_TOKEN}" ] || [ -z "${SSH_KEY}" ] || [ -z "${SSH_KEY_PUB}" ]; then
+            echo "::error::HCLOUD_TOKEN, SSH_KEY and SSH_KEY_PUB secrets are required to run e2e"
             exit 1
           fi
 
