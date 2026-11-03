@@ -18,11 +18,12 @@ package cmd
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strconv"
 
 	"github.com/FKint/devpod-provider-hetzner/pkg/hetzner"
 	"github.com/FKint/devpod-provider-hetzner/pkg/options"
-	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -52,7 +53,7 @@ func createOrStartServer(cmd *cobra.Command, args []string) error {
 
 	diskSize, err := strconv.Atoi(opts.DiskSize)
 	if err != nil {
-		return errors.Wrap(err, "parse disk size")
+		return fmt.Errorf("parse disk size: %w", err)
 	}
 
 	return h.Create(ctx, req, diskSize, *publicKey, privateKey)

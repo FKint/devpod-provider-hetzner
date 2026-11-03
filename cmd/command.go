@@ -24,7 +24,6 @@ import (
 	"github.com/FKint/devpod-provider-hetzner/pkg/hetzner"
 	"github.com/FKint/devpod-provider-hetzner/pkg/options"
 	"github.com/loft-sh/devpod/pkg/ssh"
-	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -62,7 +61,7 @@ var commandCmd = &cobra.Command{
 		// Call external address
 		sshClient, err := ssh.NewSSHClient(hetzner.SSHUsername, fmt.Sprintf("%s:%d", server.PublicNet.IPv4.IP, hetzner.SSHPort), privateKey)
 		if err != nil {
-			return errors.Wrap(err, "create ssh client")
+			return fmt.Errorf("create ssh client: %w", err)
 		}
 		defer func() {
 			err = sshClient.Close()

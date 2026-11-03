@@ -17,10 +17,10 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/loft-sh/log"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -35,7 +35,7 @@ var rootCmd = &cobra.Command{
 		logLevel := os.Getenv("DEVPOD_LOG_LEVEL")
 		if logLevel != "" {
 			if lvl, err := logrus.ParseLevel(logLevel); err != nil {
-				log.Default.Error(errors.Wrap(err, "invalid log level provided, continuing"))
+				log.Default.Error(fmt.Errorf("invalid log level provided, continuing: %w", err))
 			} else {
 				log.Default.SetLevel(lvl)
 			}
