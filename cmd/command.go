@@ -21,9 +21,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/loft-sh/devpod/pkg/ssh"
 	"github.com/FKint/devpod-provider-hetzner/pkg/hetzner"
 	"github.com/FKint/devpod-provider-hetzner/pkg/options"
+	"github.com/loft-sh/devpod/pkg/ssh"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )

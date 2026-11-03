@@ -20,10 +20,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/loft-sh/devpod/pkg/client"
-	"github.com/loft-sh/log"
 	"github.com/FKint/devpod-provider-hetzner/pkg/hetzner"
 	"github.com/FKint/devpod-provider-hetzner/pkg/options"
+	"github.com/loft-sh/devpod/pkg/client"
+	"github.com/loft-sh/log"
 	"github.com/spf13/cobra"
 )
 
