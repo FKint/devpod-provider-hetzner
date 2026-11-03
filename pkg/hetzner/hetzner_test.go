@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"sigs.k8s.io/yaml"
 )
 
 func TestFingerPrintGenerate(t *testing.T) {
@@ -66,4 +67,59 @@ func TestFingerPrintGenerate(t *testing.T) {
 			assert.Equal(t, f, test.Fingerprint)
 		})
 	}
+}
+
+func TestSSHKeyName(t *testing.T) {
+	assert.Equal(t, "short-abcdefgh", sshKeyName("short", "ABCDEFGHIJKL"))
+
+	long := "devpod-a-very-long-workspace-name-1234"
+	name := sshKeyName(long, "ABCDEFGHIJKL")
+	assert.Equal(t, long[:maxSSHKeyNameIDLength]+"-abcdefgh", name)
+}
+
+func TestCloudInitStatus(t *testing.T) {
+	for out, wantDone := range map[string]bool{
+		"status: done\n":          true,
+		"status: degraded done\n": true,
+		"status: running\n":       false,
+		"status: error\n":         false,
+	} {
+		status, err := parseCloudInitStatus([]byte(out))
+		assert.NoError(t, err)
+		assert.Equal(t, wantDone, isCloudInitDone(status.Status), out)
+	}
+
+	assert.True(t, isCloudInitFailed("error"))
+	assert.False(t, isCloudInitFailed("running"))
+}
+
+func TestGenerateUserData(t *testing.T) {
+	buf, err := generateUserData("ssh-ed25519 AAAA test\n", 42)
+	assert.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "scsi-0HC_Volume_42")
+	assert.Contains(t, out, `- "ssh-ed25519 AAAA test"`)
+	assert.Contains(t, out, "ufw --force enable")
+}
+
+func TestGenerateUserDataSSHDHardening(t *testing.T) {
+	buf, err := generateUserData("ssh-ed25519 AAAA test", 1)
+	assert.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "/etc/ssh/sshd_config.d/00-devpod.conf")
+	assert.Contains(t, out, "systemctl restart ssh;")
+	assert.Contains(t, out, "sed -i '1i PermitRootLogin no'")
+}
+
+func TestGenerateUserDataIsValidYAML(t *testing.T) {
+	buf, err := generateUserData("ssh-ed25519 AAAA test", 1)
+	assert.NoError(t, err)
+
+	var cfg struct {
+		RunCmd []any `json:"runcmd"`
+	}
+	assert.NoError(t, yaml.Unmarshal(buf.Bytes(), &cfg))
+	assert.NotEmpty(t, cfg.RunCmd)
 }

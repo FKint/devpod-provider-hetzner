@@ -19,8 +19,6 @@ package cmd
 import (
 	"context"
 	"errors"
-	"fmt"
-	"strconv"
 
 	"github.com/FKint/devpod-provider-hetzner/pkg/hetzner"
 	"github.com/FKint/devpod-provider-hetzner/pkg/options"
@@ -40,6 +38,12 @@ func createOrStartServer(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Validate before making any API calls so bad input doesn't leave resources behind
+	diskSize, err := opts.DiskSizeGB()
+	if err != nil {
+		return err
+	}
+
 	ctx := context.Background()
 	h := hetzner.NewHetzner(opts.Token)
 
@@ -49,11 +53,6 @@ func createOrStartServer(cmd *cobra.Command, args []string) error {
 	}
 	if publicKey == nil {
 		return errors.New("no public key generated")
-	}
-
-	diskSize, err := strconv.Atoi(opts.DiskSize)
-	if err != nil {
-		return fmt.Errorf("parse disk size: %w", err)
 	}
 
 	return h.Create(ctx, req, diskSize, *publicKey, privateKey)

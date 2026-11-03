@@ -14,18 +14,15 @@ package_reboot_if_required: false
 package_update: false
 runcmd:
   # Secure SSHD
-  - [
-      sed,
-      -i,
-      -e,
-      "s/^PermitRootLogin yes/PermitRootLogin no/",
-      "/etc/ssh/sshd_config",
-    ]
-  - [service, sshd, restart]
+  # PermitRootLogin is set by the sshd_config.d drop-in below
+  # Without an Include for sshd_config.d the drop-in is ignored; first match wins, so put it on top
+  - "grep -qsE '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config.d/' /etc/ssh/sshd_config || sed -i '1i PermitRootLogin no' /etc/ssh/sshd_config"
+  # The unit is "ssh" on Debian/Ubuntu and "sshd" elsewhere
+  - "if systemctl cat ssh.service >/dev/null 2>&1; then systemctl restart ssh; else systemctl restart sshd; fi"
   - [rm, -f, /root/.ssh/authorized_keys]
   # Secure UFW
   - ufw allow ssh
-  - ufw enable
+  - ufw --force enable
   # Install Docker
   - if docker ; then echo "Docker already installed"; else curl -fsSL https://get.docker.com | sh; fi
   - systemctl restart docker
@@ -41,6 +38,10 @@ users:
     ssh_authorized_keys:
       - "{{ .PublicKey }}"
 write_files:
+  # Drop-ins are first-match-wins, so 00- takes precedence over other files in the directory
+  - path: /etc/ssh/sshd_config.d/00-devpod.conf
+    content: |
+      PermitRootLogin no
   - path: /etc/docker/daemon.json
     content: |
       {

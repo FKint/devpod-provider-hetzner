@@ -19,8 +19,13 @@ package options
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
+
+// MinDiskSizeGB is the smallest volume Hetzner allows. It only applies when a
+// volume is created; an existing volume is reused whatever DISK_SIZE says.
+const MinDiskSizeGB = 10
 
 type Options struct {
 	MachineID     string
@@ -72,6 +77,19 @@ func FromEnv(skipMachine bool) (*Options, error) {
 	}
 
 	return retOptions, nil
+}
+
+// DiskSizeGB parses the DISK_SIZE option.
+func (o *Options) DiskSizeGB() (int, error) {
+	size, err := strconv.Atoi(strings.TrimSpace(o.DiskSize))
+	if err != nil {
+		return 0, fmt.Errorf("parse disk size %q: %w", o.DiskSize, err)
+	}
+	if size <= 0 {
+		return 0, fmt.Errorf("disk size must be positive, got %d", size)
+	}
+
+	return size, nil
 }
 
 func fromEnvOrError(name string, fallback ...string) (string, error) {

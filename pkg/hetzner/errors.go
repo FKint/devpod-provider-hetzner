@@ -22,6 +22,10 @@ import (
 )
 
 var (
+	ErrProvisioningFailed   = errors.New("server provisioning failed")
+	ErrServerBusy           = errors.New("server is busy")
+	ErrDiskTooSmall         = errors.New("disk size too small")
+	errSSHAuth              = errors.New("ssh authentication failed")
 	ErrBadSSHKey            = errors.New("bad ssh key")
 	ErrMultipleServersFound = func(name string) error {
 		return fmt.Errorf("multiple server with name %s found", name)

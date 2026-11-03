@@ -24,6 +24,7 @@ import (
 	"github.com/FKint/devpod-provider-hetzner/pkg/hetzner"
 	"github.com/FKint/devpod-provider-hetzner/pkg/options"
 	"github.com/loft-sh/devpod/pkg/ssh"
+	"github.com/loft-sh/log"
 	"github.com/spf13/cobra"
 )
 
@@ -64,15 +65,13 @@ var commandCmd = &cobra.Command{
 			return fmt.Errorf("create ssh client: %w", err)
 		}
 		defer func() {
-			err = sshClient.Close()
+			if err := sshClient.Close(); err != nil {
+				log.Default.Debugf("Error closing SSH connection: %v", err)
+			}
 		}()
 
 		// Run command
-		if err := ssh.Run(ctx, sshClient, command, os.Stdin, os.Stdout, os.Stderr, nil); err != nil {
-			return err
-		}
-
-		return err
+		return ssh.Run(ctx, sshClient, command, os.Stdin, os.Stdout, os.Stderr, nil)
 	},
 }
 
