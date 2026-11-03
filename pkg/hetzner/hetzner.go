@@ -291,7 +291,11 @@ func (h *Hetzner) startExisting(ctx context.Context, server *hcloud.Server, priv
 	}
 
 	if err := waitForProvisioned(ctx, server, privateKeyFile); err != nil {
-		return fmt.Errorf("%w (the existing server was left in place; run delete to remove it and start again)", err)
+		return fmt.Errorf(
+			"%w (the existing server was left in place; if this machine's SSH key was regenerated it can't be reached - "+
+				"run delete to remove it and start again)",
+			err,
+		)
 	}
 
 	return nil
@@ -317,7 +321,8 @@ func (h *Hetzner) rollback(ctx context.Context, name string, server *hcloud.Serv
 	if volume != nil {
 		log.Default.Warnf("Rolling back: deleting volume %s", volume.Name)
 
-		if _, err := h.client.Volume.Delete(ctx, volume); err != nil {
+		// Detaches first if needed and waits for the detach to settle
+		if err := h.deleteVolume(ctx, volume.Name); err != nil {
 			log.Default.Errorf("Unable to delete volume %s, please remove it manually: %v", volume.Name, err)
 		}
 	}
@@ -339,7 +344,8 @@ func waitForProvisioned(ctx context.Context, server *hcloud.Server, privateKeyFi
 		status := attemptConnection(ctx, server.PublicNet.IPv4.IP.String(), privateKeyFile)
 		switch {
 		case status == nil:
-			// Not reachable yet
+			// Not reachable yet - the "error" reports must be consecutive
+			errorCount = 0
 		case isCloudInitDone(status.Status):
 			log.Default.Info("Server provisioned")
 			return nil
@@ -371,14 +377,8 @@ func isCloudInitFailed(status string) bool {
 	return status == "error"
 }
 
-// Delete removes the SSH keys, the server and then its volume. Every step is
-// idempotent and the machine stays visible until the end, so a failed delete
-// can simply be retried.
+// Delete removes the server, its volume and then its SSH keys.
 func (h *Hetzner) Delete(ctx context.Context, name string) error {
-	if err := h.deleteSSHKeys(ctx, name); err != nil {
-		return err
-	}
-
 	// The server goes before the volume: a volume can't be deleted while attached,
 	// and deleting the server detaches it without hot-unplugging a mounted disk.
 	server, err := h.GetByName(ctx, name)
@@ -395,7 +395,13 @@ func (h *Hetzner) Delete(ctx context.Context, name string) error {
 		}
 	}
 
-	return h.deleteVolume(ctx, name)
+	if err := h.deleteVolume(ctx, name); err != nil {
+		return err
+	}
+
+	// Keys last: until here the machine is intact, and every step is idempotent so a
+	// failed delete (which returns an error to the caller) can simply be retried.
+	return h.deleteSSHKeys(ctx, name)
 }
 
 func (h *Hetzner) deleteSSHKeys(ctx context.Context, name string) error {
@@ -472,26 +478,32 @@ func (h *Hetzner) Status(ctx context.Context, name string) (client.Status, error
 }
 
 // WaitForStatus polls until the machine reaches the wanted status or the timeout expires.
+// Transient API errors are retried until the deadline.
 func (h *Hetzner) WaitForStatus(ctx context.Context, name string, want client.Status) error {
 	ctx, cancel := context.WithTimeout(ctx, statusTimeout)
 	defer cancel()
 
 	var last client.Status
+	var lastErr error
 	for {
 		status, err := h.Status(ctx, name)
-		if err != nil {
-			if ctx.Err() != nil {
-				return fmt.Errorf("waiting for status %q (last seen %q): %w", want, last, ctx.Err())
-			}
-			return fmt.Errorf("retrieving server status: %w", err)
-		} else if status == want {
+		switch {
+		case err != nil:
+			lastErr = err
+			log.Default.Warnf("Error retrieving server status, retrying: %v", err)
+		case status == want:
 			return nil
+		default:
+			lastErr = nil
+			last = status
 		}
-		last = status
 
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("waiting for status %q (currently %q): %w", want, status, ctx.Err())
+			if lastErr != nil {
+				return fmt.Errorf("waiting for status %q: %w", want, lastErr)
+			}
+			return fmt.Errorf("waiting for status %q (currently %q): %w", want, last, ctx.Err())
 		case <-time.After(statusPoll):
 		}
 	}
@@ -533,24 +545,26 @@ func (h *Hetzner) deleteVolume(ctx context.Context, name string) error {
 			log.Default.Errorf("Error in volume detach action: %s, %s", action.Command, err)
 			return err
 		}
+	}
 
-		// Wait until the volume is detached
-		waitCtx, cancel := context.WithTimeout(ctx, actionTimeout)
-		defer cancel()
+	// Make sure the detach has settled (also covers a server delete that is still releasing it)
+	waitCtx, cancel := context.WithTimeout(ctx, actionTimeout)
+	defer cancel()
 
-		for volume.Server != nil {
-			select {
-			case <-waitCtx.Done():
-				return fmt.Errorf("waiting for volume to detach: %w", waitCtx.Err())
-			case <-time.After(time.Second):
-			}
+	for {
+		volume, err = h.volumeByName(waitCtx, name)
+		if err != nil {
+			return err
+		} else if volume == nil {
+			return nil
+		} else if volume.Server == nil {
+			break
+		}
 
-			volume, err = h.volumeByName(waitCtx, name)
-			if err != nil {
-				return err
-			} else if volume == nil {
-				return nil
-			}
+		select {
+		case <-waitCtx.Done():
+			return fmt.Errorf("waiting for volume to detach: %w", waitCtx.Err())
+		case <-time.After(time.Second):
 		}
 	}
 
@@ -585,6 +599,10 @@ func attemptConnection(ctx context.Context, addr string, privateKeyFile []byte) 
 
 	target := fmt.Sprintf("%s:%d", addr, SSHPort)
 
+	// Bound the whole attempt (handshake and command) so a hung sshd can't outlive the provisioning deadline
+	ctx, cancel := context.WithTimeout(ctx, sshAttemptTimeout)
+	defer cancel()
+
 	// ssh.NewSSHClient dials without a timeout or context, so probe the port first.
 	// A server that is still booting (or filtered) then costs seconds, not minutes.
 	conn, err := (&net.Dialer{Timeout: sshDialTimeout}).DialContext(ctx, "tcp", target)
@@ -595,7 +613,7 @@ func attemptConnection(ctx context.Context, addr string, privateKeyFile []byte) 
 	_ = conn.Close()
 
 	// Check the server is provisioned - this runs "ssh user@path cloud-init status"
-	sshClient, err := ssh.NewSSHClient(SSHUsername, target, privateKeyFile)
+	sshClient, err := newSSHClient(ctx, target, privateKeyFile)
 	if err != nil {
 		log.Default.Warnf("Unable to connect to server: %v", err)
 		return nil
@@ -605,10 +623,6 @@ func attemptConnection(ctx context.Context, addr string, privateKeyFile []byte) 
 			log.Default.Debugf("Error closing SSH connection: %v", err)
 		}
 	}()
-
-	// Bound the command so a hung session can't outlive the provisioning deadline
-	ctx, cancel := context.WithTimeout(ctx, sshCommandTimeout)
-	defer cancel()
 
 	buf := new(bytes.Buffer)
 	if err := ssh.Run(ctx, sshClient, "cloud-init status || true", &bytes.Buffer{}, buf, &bytes.Buffer{}, nil); err != nil {
@@ -623,6 +637,35 @@ func attemptConnection(ctx context.Context, addr string, privateKeyFile []byte) 
 	}
 
 	return status
+}
+
+// newSSHClient wraps ssh.NewSSHClient, which takes no context or timeout, so a
+// stalled handshake is abandoned when ctx ends instead of blocking forever.
+func newSSHClient(ctx context.Context, target string, privateKey []byte) (*cryptoSsh.Client, error) {
+	type result struct {
+		client *cryptoSsh.Client
+		err    error
+	}
+
+	ch := make(chan result, 1)
+	go func() {
+		c, err := ssh.NewSSHClient(SSHUsername, target, privateKey)
+		ch <- result{c, err}
+	}()
+
+	select {
+	case r := <-ch:
+		return r.client, r.err
+	case <-ctx.Done():
+		// Close the connection if the handshake eventually completes
+		go func() {
+			if r := <-ch; r.client != nil {
+				_ = r.client.Close()
+			}
+		}()
+
+		return nil, ctx.Err()
+	}
 }
 
 func parseCloudInitStatus(out []byte) (*cloudInit, error) {

@@ -14,13 +14,7 @@ package_reboot_if_required: false
 package_update: false
 runcmd:
   # Secure SSHD
-  - [
-      sed,
-      -i,
-      -e,
-      "s/^#\\?PermitRootLogin.*/PermitRootLogin no/",
-      "/etc/ssh/sshd_config",
-    ]
+  # PermitRootLogin is set by the sshd_config.d drop-in below
   - systemctl restart ssh || systemctl restart sshd
   - [rm, -f, /root/.ssh/authorized_keys]
   # Secure UFW
