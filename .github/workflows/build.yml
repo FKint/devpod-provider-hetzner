@@ -10,12 +10,19 @@ on:
       - main
   workflow_dispatch:
 permissions:
-  contents: write
-  packages: write
+  contents: read
   pull-requests: read
+# TODO: cancelling a run mid `provider create` can leak Hetzner resources if the
+# always() cleanup outlasts the cancellation grace period. Add a scheduled
+# workflow that deletes test-* servers/volumes/SSH keys older than ~1h, or stop
+# cancelling e2e runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   commitlint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
     steps:
@@ -27,6 +34,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -56,13 +64,23 @@ jobs:
       - uses: pre-commit/action@v3.0.1
 
   e2e:
+    # Only spend money on real servers once the cheap jobs have passed
+    needs:
+      - commitlint
+      - test
+      - build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Secrets and approval gating live in this environment
+    environment: Hetzner E2E
+    # Fork PRs have no access to secrets and must never create billable resources
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     env:
       HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
       DISK_IMAGE: docker-ce
       DISK_SIZE: "30"
       MACHINE_ID: test-${{ github.run_id }}
-      MACHINE_FOLDER: ${{ github.workspace }}./ssh
+      MACHINE_FOLDER: ${{ github.workspace }}/.ssh
       MACHINE_TYPE: "cx22"
       REGION: "nbg1"
       SSH_KEY_PUB: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2sB1n570BgGJ3+I0Dgzxhlf9ukc+Hp+C/zsIH4J8Xm vscode@df47ba471beb"
@@ -70,14 +88,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Fork PRs are excluded by the job-level `if`, so missing secrets here
+      # are a misconfiguration and must fail rather than silently skip e2e.
+      - name: Check e2e secrets
+        run: |
+          if [ -z "${HCLOUD_TOKEN}" ] || [ -z "${SSH_KEY}" ]; then
+            echo "::error::HCLOUD_TOKEN and SSH_KEY secrets are required to run e2e"
+            exit 1
+          fi
+
       - uses: hetznercloud/setup-hcloud@v1
 
       - name: Set up SSH keys
         run: |
-          mkdir -p ${MACHINE_FOLDER}
-          echo ${SSH_KEY_PUB} > ${MACHINE_FOLDER}/sshkey.pub
-          echo ${SSH_KEY} > ${MACHINE_FOLDER}/sshkey
-          ls -la ${MACHINE_FOLDER}
+          mkdir -p "${MACHINE_FOLDER}"
+          printf '%s\n' "${SSH_KEY_PUB}" > "${MACHINE_FOLDER}/sshkey.pub"
+          printf '%s\n' "${SSH_KEY}" > "${MACHINE_FOLDER}/sshkey"
+          chmod 600 "${MACHINE_FOLDER}/sshkey"
+          ls -la "${MACHINE_FOLDER}"
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -92,7 +120,9 @@ jobs:
       - name: Run command
         env:
           COMMAND: hostname
-        run: ./provider command | grep ${MACHINE_ID}
+        run: |
+          set -o pipefail
+          ./provider command | grep -F -- "${MACHINE_ID}"
 
       - name: Stop command
         run: ./provider stop
@@ -103,7 +133,9 @@ jobs:
       - name: Run command
         env:
           COMMAND: hostname
-        run: ./provider command | grep ${MACHINE_ID}
+        run: |
+          set -o pipefail
+          ./provider command | grep -F -- "${MACHINE_ID}"
 
       - name: Delete command
         run: ./provider delete
@@ -119,6 +151,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     outputs:
       is_tag: ${{ steps.branch-name.outputs.is_tag }}
     env:
@@ -169,6 +202,10 @@ jobs:
 
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      packages: write
     needs:
       - build
       - commitlint
