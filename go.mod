@@ -10,7 +10,6 @@ require (
 	github.com/hetznercloud/hcloud-go/v2 v2.31.0
 	github.com/loft-sh/devpod v0.6.15
 	github.com/loft-sh/log v0.0.0-20250610153027-c2f046135b12
-	github.com/mrsimonemms/hetzner-golang-actions v0.1.0
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.10.1

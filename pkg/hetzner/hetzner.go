@@ -35,7 +35,6 @@ import (
 	"github.com/loft-sh/devpod/pkg/client"
 	"github.com/loft-sh/devpod/pkg/ssh"
 	"github.com/loft-sh/log"
-	hga "github.com/mrsimonemms/hetzner-golang-actions"
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v3"
 )
@@ -190,7 +189,7 @@ func (h *Hetzner) Create(ctx context.Context, req *hcloud.ServerCreateOpts, disk
 			return err
 		}
 
-		if err := hga.NewWaiter(h.client).Wait(ctx, result.Action, result.NextActions...); err != nil {
+		if err := h.waitForActions(ctx, append([]*hcloud.Action{result.Action}, result.NextActions...)...); err != nil {
 			log.Default.Errorf("Error in volume creation action: %s", err)
 			return err
 		}
@@ -224,7 +223,7 @@ func (h *Hetzner) Create(ctx context.Context, req *hcloud.ServerCreateOpts, disk
 
 	log.Default.Info("Server creation triggered")
 
-	if err := hga.NewWaiter(h.client).Wait(ctx, server.Action, server.NextActions...); err != nil {
+	if err := h.waitForActions(ctx, append([]*hcloud.Action{server.Action}, server.NextActions...)...); err != nil {
 		log.Default.Errorf("Error in server creation action: %s", err)
 		return err
 	}
@@ -293,7 +292,7 @@ func (h *Hetzner) Delete(ctx context.Context, name string) error {
 		return err
 	}
 
-	return hga.NewWaiter(h.client).Wait(ctx, result.Action)
+	return h.waitForActions(ctx, result.Action)
 }
 
 func (h *Hetzner) GetByName(ctx context.Context, name string) (*hcloud.Server, error) {
@@ -360,7 +359,7 @@ func (h *Hetzner) Stop(ctx context.Context, name string) error {
 		return err
 	}
 
-	return hga.NewWaiter(h.client).Wait(ctx, result.Action)
+	return h.waitForActions(ctx, result.Action)
 }
 
 func (h *Hetzner) deleteVolume(ctx context.Context, name string) error {
@@ -374,7 +373,7 @@ func (h *Hetzner) deleteVolume(ctx context.Context, name string) error {
 			return errors.Wrap(err, "detach volume")
 		}
 
-		if err := hga.NewWaiter(h.client).Wait(ctx, action); err != nil {
+		if err := h.waitForActions(ctx, action); err != nil {
 			log.Default.Errorf("Error in volume detach action: %s, %s", action.Command, err)
 			return err
 		}
@@ -477,4 +476,15 @@ func generateUserData(_, publicKey string, volumeID int64) (*bytes.Buffer, error
 	}
 
 	return buf, nil
+}
+
+// actionTimeout bounds how long we wait for Hetzner actions to complete.
+const actionTimeout = time.Minute
+
+// waitForActions blocks until all actions succeed, one fails, or the timeout/context expires.
+func (h *Hetzner) waitForActions(ctx context.Context, actions ...*hcloud.Action) error {
+	ctx, cancel := context.WithTimeout(ctx, actionTimeout)
+	defer cancel()
+
+	return h.client.Action.WaitFor(ctx, actions...)
 }
