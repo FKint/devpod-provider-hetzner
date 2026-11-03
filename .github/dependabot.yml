@@ -1,0 +1,54 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    groups:
+      go-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      # devpod 0.7.x is only published as alpha releases. Skip minor/major
+      # bumps so we stay on stable 0.6.x; patch releases are still proposed.
+      # Remove once 0.7.0 is released and we are ready to move.
+      - dependency-name: github.com/loft-sh/devpod
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-major
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: pre-commit
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    groups:
+      pre-commit-hooks:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(deps)"

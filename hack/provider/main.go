@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
@@ -32,19 +33,31 @@ import (
 )
 
 const (
-	osLinux   = "linux"
-	osDarwin  = "darwin"
-	osWindows = "windows"
 	archAMD64 = "amd64"
 	archARM64 = "arm64"
 )
 
-var checksumMap = map[string]string{
-	"./dist/devpod-provider-hetzner-linux-amd64":       "CHECKSUM_LINUX_AMD64",
-	"./dist/devpod-provider-hetzner-linux-arm64":       "CHECKSUM_LINUX_ARM64",
-	"./dist/devpod-provider-hetzner-darwin-amd64":      "CHECKSUM_DARWIN_AMD64",
-	"./dist/devpod-provider-hetzner-darwin-arm64":      "CHECKSUM_DARWIN_ARM64",
-	"./dist/devpod-provider-hetzner-windows-amd64.exe": "CHECKSUM_WINDOWS_AMD64",
+type platform struct{ os, arch string }
+
+// binaryName is the file name of the provider binary for this platform, as
+// produced by hack/build.sh.
+func (p platform) binaryName() string {
+	name := fmt.Sprintf("devpod-provider-hetzner-%s-%s", p.os, p.arch)
+	if p.os == "windows" {
+		name += ".exe"
+	}
+
+	return name
+}
+
+// platforms lists every binary published with a release. Only the linux ones
+// are also injected into the remote agent.
+var platforms = []platform{
+	{"linux", archAMD64},
+	{"linux", archARM64},
+	{"darwin", archAMD64},
+	{"darwin", archARM64},
+	{"windows", archAMD64},
 }
 
 func main() {
@@ -94,13 +107,13 @@ func main() {
 	}
 
 	checksums := map[string]string{}
-	for filePath, v := range checksumMap {
-		checksum, err := File(filePath)
+	for _, p := range platforms {
+		checksum, err := File(filepath.Join("dist", p.binaryName()))
 		if err != nil {
-			panic(fmt.Errorf("generate checksum for %s: %v", filePath, err))
+			panic(fmt.Errorf("generate checksum for %s: %w", p.binaryName(), err))
 		}
 
-		checksums[v] = checksum
+		checksums[p.binaryName()] = checksum
 	}
 
 	version := fmt.Sprintf("v%s", os.Args[1])
@@ -110,7 +123,7 @@ func main() {
 		checksums,
 		"nbg1",
 		regions,
-		"cpx22",
+		"cx32",
 		machineTypes,
 	))
 	if err != nil {
@@ -123,13 +136,30 @@ func main() {
 //nolint:funlen // ignore
 func BuildConfig(
 	version string,
-	checksum map[string]string,
+	checksums map[string]string,
 	defaultRegion string,
 	regions types.OptionEnumArray,
 	defaultMachineType string,
 	machineTypes types.OptionEnumArray,
 ) provider.ProviderConfig {
 	releaseURLBase := fmt.Sprintf("https://github.com/FKint/devpod-provider-hetzner/releases/download/%s", version)
+	binaries := func(onlyOS string) []*provider.ProviderBinary {
+		var out []*provider.ProviderBinary
+		for _, p := range platforms {
+			if onlyOS != "" && p.os != onlyOS {
+				continue
+			}
+
+			out = append(out, &provider.ProviderBinary{
+				OS:       p.os,
+				Arch:     p.arch,
+				Path:     releaseURLBase + "/" + p.binaryName(),
+				Checksum: checksums[p.binaryName()],
+			})
+		}
+
+		return out
+	}
 
 	return provider.ProviderConfig{
 		Name:        "hetzner",
@@ -219,60 +249,12 @@ fi`,
 			Timeout:                 "${INACTIVITY_TIMEOUT}",
 			InjectGitCredentials:    "${INJECT_GIT_CREDENTIALS}",
 			InjectDockerCredentials: "${INJECT_DOCKER_CREDENTIALS}",
-			Binaries: map[string][]*provider.ProviderBinary{
-				"HETZNER_PROVIDER": {
-					{
-						OS:       osLinux,
-						Arch:     archAMD64,
-						Path:     fmt.Sprintf("%s/devpod-provider-hetzner-linux-amd64", releaseURLBase),
-						Checksum: checksum["CHECKSUM_LINUX_AMD64"],
-					},
-					{
-						OS:       osLinux,
-						Arch:     archARM64,
-						Path:     fmt.Sprintf("%s/devpod-provider-hetzner-linux-arm64", releaseURLBase),
-						Checksum: checksum["CHECKSUM_LINUX_ARM64"],
-					},
-				},
-			},
+			Binaries:                map[string][]*provider.ProviderBinary{"HETZNER_PROVIDER": binaries("linux")},
 			Exec: provider.ProviderAgentConfigExec{
 				Shutdown: types.StrArray{"${HETZNER_PROVIDER} stop"},
 			},
 		},
-		Binaries: map[string][]*provider.ProviderBinary{
-			"HETZNER_PROVIDER": {
-				{
-					OS:       osLinux,
-					Arch:     archAMD64,
-					Path:     fmt.Sprintf("%s/devpod-provider-hetzner-linux-amd64", releaseURLBase),
-					Checksum: checksum["CHECKSUM_LINUX_AMD64"],
-				},
-				{
-					OS:       osLinux,
-					Arch:     archARM64,
-					Path:     fmt.Sprintf("%s/devpod-provider-hetzner-linux-arm64", releaseURLBase),
-					Checksum: checksum["CHECKSUM_LINUX_ARM64"],
-				},
-				{
-					OS:       osDarwin,
-					Arch:     archAMD64,
-					Path:     fmt.Sprintf("%s/devpod-provider-hetzner-darwin-amd64", releaseURLBase),
-					Checksum: checksum["CHECKSUM_DARWIN_AMD64"],
-				},
-				{
-					OS:       osDarwin,
-					Arch:     archARM64,
-					Path:     fmt.Sprintf("%s/devpod-provider-hetzner-darwin-arm64", releaseURLBase),
-					Checksum: checksum["CHECKSUM_DARWIN_ARM64"],
-				},
-				{
-					OS:       osWindows,
-					Arch:     archAMD64,
-					Path:     fmt.Sprintf("%s/devpod-provider-hetzner-windows-amd64.exe", releaseURLBase),
-					Checksum: checksum["CHECKSUM_WINDOWS_AMD64"],
-				},
-			},
-		},
+		Binaries: map[string][]*provider.ProviderBinary{"HETZNER_PROVIDER": binaries("")},
 		Exec: provider.ProviderCommands{
 			Init:    types.StrArray{"${HETZNER_PROVIDER} init"},
 			Command: types.StrArray{"${HETZNER_PROVIDER} command"},

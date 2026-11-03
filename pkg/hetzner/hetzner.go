@@ -19,6 +19,7 @@ package hetzner
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"embed"
 	"encoding/base64"
 	"fmt"
@@ -30,14 +31,11 @@ import (
 	cryptoSsh "golang.org/x/crypto/ssh"
 
 	"github.com/FKint/devpod-provider-hetzner/pkg/options"
-	"github.com/google/uuid"
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 	"github.com/loft-sh/devpod/pkg/client"
 	"github.com/loft-sh/devpod/pkg/ssh"
 	"github.com/loft-sh/log"
-	hga "github.com/mrsimonemms/hetzner-golang-actions"
-	"github.com/pkg/errors"
-	"gopkg.in/yaml.v3"
+	"sigs.k8s.io/yaml"
 )
 
 //go:embed cloud-config.yaml
@@ -60,7 +58,7 @@ func NewHetzner(token string) *Hetzner {
 func (h *Hetzner) upsertPublicKey(ctx context.Context, publicKey, machineID string) (*hcloud.SSHKey, error) {
 	fingerprint, err := generateSSHKeyFingerprint(publicKey)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to generate fingerprint for public ssh key")
+		return nil, fmt.Errorf("failed to generate fingerprint for public ssh key: %w", err)
 	}
 
 	sshKey, _, err := h.client.SSHKey.GetByFingerprint(ctx, fingerprint)
@@ -73,7 +71,7 @@ func (h *Hetzner) upsertPublicKey(ctx context.Context, publicKey, machineID stri
 		if len(machineID) >= 24 {
 			machineID = machineID[:24]
 		}
-		name := fmt.Sprintf("%s-%s", machineID, uuid.NewString()[:8])
+		name := fmt.Sprintf("%s-%s", machineID, strings.ToLower(rand.Text()[:8]))
 
 		log.Default.Infof("Uploading SSH key: %s", name)
 
@@ -163,7 +161,7 @@ func (h *Hetzner) BuildServerOptions(
 		SSHKeys: []*hcloud.SSHKey{
 			sshKey,
 		},
-	}, hcloud.Ptr(string(publicKey)), privateKey, nil
+	}, new(string(publicKey)), privateKey, nil
 }
 
 func (h *Hetzner) Create(ctx context.Context, req *hcloud.ServerCreateOpts, diskSize int, publicKey string, privateKeyFile []byte) error {
@@ -182,15 +180,15 @@ func (h *Hetzner) Create(ctx context.Context, req *hcloud.ServerCreateOpts, disk
 			Location:  req.Location,
 			Name:      req.Name,
 			Size:      diskSize,
-			Format:    hcloud.Ptr("ext4"),
-			Automount: hcloud.Ptr(false),
+			Format:    new("ext4"),
+			Automount: new(false),
 			Labels:    req.Labels,
 		})
 		if err != nil {
 			return err
 		}
 
-		if err := hga.NewWaiter(h.client).Wait(ctx, result.Action, result.NextActions...); err != nil {
+		if err := h.waitForActions(ctx, append([]*hcloud.Action{result.Action}, result.NextActions...)...); err != nil {
 			log.Default.Errorf("Error in volume creation action: %s", err)
 			return err
 		}
@@ -224,7 +222,7 @@ func (h *Hetzner) Create(ctx context.Context, req *hcloud.ServerCreateOpts, disk
 
 	log.Default.Info("Server creation triggered")
 
-	if err := hga.NewWaiter(h.client).Wait(ctx, server.Action, server.NextActions...); err != nil {
+	if err := h.waitForActions(ctx, append([]*hcloud.Action{server.Action}, server.NextActions...)...); err != nil {
 		log.Default.Errorf("Error in server creation action: %s", err)
 		return err
 	}
@@ -293,7 +291,7 @@ func (h *Hetzner) Delete(ctx context.Context, name string) error {
 		return err
 	}
 
-	return hga.NewWaiter(h.client).Wait(ctx, result.Action)
+	return h.waitForActions(ctx, result.Action)
 }
 
 func (h *Hetzner) GetByName(ctx context.Context, name string) (*hcloud.Server, error) {
@@ -360,7 +358,7 @@ func (h *Hetzner) Stop(ctx context.Context, name string) error {
 		return err
 	}
 
-	return hga.NewWaiter(h.client).Wait(ctx, result.Action)
+	return h.waitForActions(ctx, result.Action)
 }
 
 func (h *Hetzner) deleteVolume(ctx context.Context, name string) error {
@@ -371,10 +369,10 @@ func (h *Hetzner) deleteVolume(ctx context.Context, name string) error {
 		// Detatch volume
 		action, _, err := h.client.Volume.Detach(ctx, volume)
 		if err != nil {
-			return errors.Wrap(err, "detach volume")
+			return fmt.Errorf("detach volume: %w", err)
 		}
 
-		if err := hga.NewWaiter(h.client).Wait(ctx, action); err != nil {
+		if err := h.waitForActions(ctx, action); err != nil {
 			log.Default.Errorf("Error in volume detach action: %s, %s", action.Command, err)
 			return err
 		}
@@ -397,7 +395,7 @@ func (h *Hetzner) deleteVolume(ctx context.Context, name string) error {
 	if volume != nil {
 		_, err = h.client.Volume.Delete(ctx, volume)
 		if err != nil {
-			return errors.Wrap(err, "delete volume")
+			return fmt.Errorf("delete volume: %w", err)
 		}
 	}
 
@@ -477,4 +475,16 @@ func generateUserData(_, publicKey string, volumeID int64) (*bytes.Buffer, error
 	}
 
 	return buf, nil
+}
+
+// actionTimeout bounds how long we wait for Hetzner actions to complete.
+// Server creation with attached volumes can exceed a minute on a busy API.
+const actionTimeout = 5 * time.Minute
+
+// waitForActions blocks until all actions succeed, one fails, or the timeout/context expires.
+func (h *Hetzner) waitForActions(ctx context.Context, actions ...*hcloud.Action) error {
+	ctx, cancel := context.WithTimeout(ctx, actionTimeout)
+	defer cancel()
+
+	return h.client.Action.WaitFor(ctx, actions...)
 }

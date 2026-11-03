@@ -3,12 +3,6 @@ repos:
     rev: v1.2.1
     hooks:
       - id: license-eye
-      - id: go-fmt-import
-      - id: go-vet
-        entry: go vet ./...
-      - id: gofumpt
-      - id: go-err-check
-      - id: go-static-check
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
@@ -29,19 +23,17 @@ repos:
       - id: conventional-pre-commit
         stages:
           - commit-msg
-  - repo: https://github.com/trussworks/pre-commit-hooks
-    rev: v2.0.0
-    hooks:
-      - id: markdown-toc
   - repo: https://github.com/DavidAnson/markdownlint-cli2
     rev: v0.18.1
     hooks:
       - id: markdownlint-cli2
-  - repo: https://github.com/golangci/golangci-lint
-    rev: v2.1.6
+  - repo: local
     hooks:
-      - id: golangci-lint
-  - repo: https://github.com/mrsimonemms/toodaloo
-    rev: v0.2.4
-    hooks:
-      - id: scan
+      - id: mdtoc
+        name: mdtoc
+        description: Regenerate the README table of contents
+        language: golang
+        additional_dependencies:
+          - sigs.k8s.io/mdtoc@v1.4.0
+        entry: mdtoc --inplace
+        files: ^README\.md$

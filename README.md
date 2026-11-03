@@ -10,20 +10,16 @@ This is a fork of
 created by Simon Emms. All credit for the original work goes to the original author.
 
 <!-- toc -->
-
-* [Project status](#project-status)
-* [Usage](#usage)
-* [Development](#development)
-  * [Required environment variables](#required-environment-variables)
-  * [Testing independently of DevPod](#testing-independently-of-devpod)
-  * [Testing in the DevPod ecosystem](#testing-in-the-devpod-ecosystem)
-* [Contributing](#contributing)
-  * [Open in a container](#open-in-a-container)
-  * [Commit style](#commit-style)
-
-<!-- Regenerate with "pre-commit run -a markdown-toc" -->
-
-<!-- tocstop -->
+- [Project status](#project-status)
+- [Usage](#usage)
+- [Development](#development)
+  - [Required environment variables](#required-environment-variables)
+  - [Testing independently of DevPod](#testing-independently-of-devpod)
+  - [Testing in the DevPod ecosystem](#testing-in-the-devpod-ecosystem)
+- [Contributing](#contributing)
+  - [Open in a container](#open-in-a-container)
+  - [Commit style](#commit-style)
+<!-- /toc -->
 
 > Use [this referral code](https://hetzner.cloud/?ref=UWVUhEZNkm6p) to get €20 in
 > credits (at time of writing).
@@ -64,7 +60,7 @@ To use this provider in your DevPod setup, you will need to do the following ste
 | `HCLOUD_TOKEN` | [Hetzner API token](https://docs.hetzner.com/cloud/api/getting-started/generating-api-token/) with `read & write` access | - |
 | `MACHINE_FOLDER` | Local home folder | `~/.ssh` |
 | `MACHINE_ID` | Unique identifier for the machine | `some-machine-id` |
-| `MACHINE_TYPE` | Hetzner machine size | `cpx22` |
+| `MACHINE_TYPE` | Hetzner machine size | `cx32` |
 | `REGION` | Hetzner region ID | `nbg1` |
 | `TOKEN` | **Deprecated**. Replaced by `HCLOUD_TOKEN` | - |
 
@@ -112,14 +108,14 @@ To test the provider within the DevPod ecosystem:
 
 ## Contributing
 
-* Get a [Hetzner](https://hetzner.cloud/?ref=UWVUhEZNkm6p) account
-* Get an [API token](https://docs.hetzner.com/cloud/api/getting-started/generating-api-token/)
+- Get a [Hetzner](https://hetzner.cloud/?ref=UWVUhEZNkm6p) account
+- Get an [API token](https://docs.hetzner.com/cloud/api/getting-started/generating-api-token/)
   with `read & write` access
-* Save this as `HCLOUD_TOKEN` in your `.envrc` file
+- Save this as `HCLOUD_TOKEN` in your `.envrc` file
 
 ### Open in a container
 
-* [Open in a container](https://code.visualstudio.com/docs/devcontainers/containers)
+- [Open in a container](https://code.visualstudio.com/docs/devcontainers/containers)
 
 ### Commit style
 
