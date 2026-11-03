@@ -81,9 +81,8 @@ jobs:
       DISK_SIZE: "30"
       MACHINE_ID: test-${{ github.run_id }}
       MACHINE_FOLDER: ${{ github.workspace }}/.ssh
-      MACHINE_TYPE: "cx22"
+      MACHINE_TYPE: "cpx22"
       REGION: "nbg1"
-      SSH_KEY_PUB: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2sB1n570BgGJ3+I0Dgzxhlf9ukc+Hp+C/zsIH4J8Xm vscode@df47ba471beb"
       SSH_KEY: ${{ secrets.SSH_KEY }}
     steps:
       - uses: actions/checkout@v4
@@ -102,9 +101,11 @@ jobs:
       - name: Set up SSH keys
         run: |
           mkdir -p "${MACHINE_FOLDER}"
-          printf '%s\n' "${SSH_KEY_PUB}" > "${MACHINE_FOLDER}/sshkey.pub"
-          printf '%s\n' "${SSH_KEY}" > "${MACHINE_FOLDER}/sshkey"
+          # Strip CRs in case the secret was pasted with CRLF line endings
+          printf '%s\n' "${SSH_KEY}" | tr -d '\r' > "${MACHINE_FOLDER}/sshkey"
           chmod 600 "${MACHINE_FOLDER}/sshkey"
+          # Derive the public key so it can never drift from the private key
+          ssh-keygen -y -f "${MACHINE_FOLDER}/sshkey" > "${MACHINE_FOLDER}/sshkey.pub"
           ls -la "${MACHINE_FOLDER}"
 
       - name: Set up Go

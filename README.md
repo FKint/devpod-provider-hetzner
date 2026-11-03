@@ -64,7 +64,7 @@ To use this provider in your DevPod setup, you will need to do the following ste
 | `HCLOUD_TOKEN` | [Hetzner API token](https://docs.hetzner.com/cloud/api/getting-started/generating-api-token/) with `read & write` access | - |
 | `MACHINE_FOLDER` | Local home folder | `~/.ssh` |
 | `MACHINE_ID` | Unique identifier for the machine | `some-machine-id` |
-| `MACHINE_TYPE` | Hetzner machine size | `cx22` |
+| `MACHINE_TYPE` | Hetzner machine size | `cpx22` |
 | `REGION` | Hetzner region ID | `nbg1` |
 | `TOKEN` | **Deprecated**. Replaced by `HCLOUD_TOKEN` | - |
 
