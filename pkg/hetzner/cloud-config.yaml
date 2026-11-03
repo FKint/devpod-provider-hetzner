@@ -1,4 +1,6 @@
 #cloud-config
+# This is a Go template (see generateUserData), not plain YAML: its conditional
+# lines are only valid once rendered. The tests parse the rendered output.
 
 mounts:
   - - /dev/disk/by-id/scsi-0HC_Volume_{{ .VolumeID }}
