@@ -64,6 +64,11 @@ jobs:
       - uses: pre-commit/action@v3.0.1
 
   e2e:
+    # Only spend money on real servers once the cheap jobs have passed
+    needs:
+      - commitlint
+      - test
+      - build
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Fork PRs have no access to secrets and must never create billable resources
