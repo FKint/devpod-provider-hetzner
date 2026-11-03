@@ -27,3 +27,13 @@ repos:
     rev: v0.18.1
     hooks:
       - id: markdownlint-cli2
+  - repo: local
+    hooks:
+      - id: mdtoc
+        name: mdtoc
+        description: Regenerate the README table of contents
+        language: golang
+        additional_dependencies:
+          - sigs.k8s.io/mdtoc@v1.4.0
+        entry: mdtoc --inplace
+        files: ^README\.md$

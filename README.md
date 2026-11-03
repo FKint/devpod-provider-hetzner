@@ -10,20 +10,16 @@ This is a fork of
 created by Simon Emms. All credit for the original work goes to the original author.
 
 <!-- toc -->
-
-* [Project status](#project-status)
-* [Usage](#usage)
-* [Development](#development)
-  * [Required environment variables](#required-environment-variables)
-  * [Testing independently of DevPod](#testing-independently-of-devpod)
-  * [Testing in the DevPod ecosystem](#testing-in-the-devpod-ecosystem)
-* [Contributing](#contributing)
-  * [Open in a container](#open-in-a-container)
-  * [Commit style](#commit-style)
-
-<!-- Update this table of contents by hand when headings change -->
-
-<!-- tocstop -->
+- [Project status](#project-status)
+- [Usage](#usage)
+- [Development](#development)
+  - [Required environment variables](#required-environment-variables)
+  - [Testing independently of DevPod](#testing-independently-of-devpod)
+  - [Testing in the DevPod ecosystem](#testing-in-the-devpod-ecosystem)
+- [Contributing](#contributing)
+  - [Open in a container](#open-in-a-container)
+  - [Commit style](#commit-style)
+<!-- /toc -->
 
 > Use [this referral code](https://hetzner.cloud/?ref=UWVUhEZNkm6p) to get €20 in
 > credits (at time of writing).
@@ -112,14 +108,14 @@ To test the provider within the DevPod ecosystem:
 
 ## Contributing
 
-* Get a [Hetzner](https://hetzner.cloud/?ref=UWVUhEZNkm6p) account
-* Get an [API token](https://docs.hetzner.com/cloud/api/getting-started/generating-api-token/)
+- Get a [Hetzner](https://hetzner.cloud/?ref=UWVUhEZNkm6p) account
+- Get an [API token](https://docs.hetzner.com/cloud/api/getting-started/generating-api-token/)
   with `read & write` access
-* Save this as `HCLOUD_TOKEN` in your `.envrc` file
+- Save this as `HCLOUD_TOKEN` in your `.envrc` file
 
 ### Open in a container
 
-* [Open in a container](https://code.visualstudio.com/docs/devcontainers/containers)
+- [Open in a container](https://code.visualstudio.com/docs/devcontainers/containers)
 
 ### Commit style
 
