@@ -21,7 +21,7 @@ runcmd:
       "s/^#\\?PermitRootLogin.*/PermitRootLogin no/",
       "/etc/ssh/sshd_config",
     ]
-  - [service, sshd, restart]
+  - systemctl restart ssh || systemctl restart sshd
   - [rm, -f, /root/.ssh/authorized_keys]
   # Secure UFW
   - ufw allow ssh
@@ -41,6 +41,10 @@ users:
     ssh_authorized_keys:
       - "{{ .PublicKey }}"
 write_files:
+  # Drop-ins are first-match-wins, so 00- takes precedence over other files in the directory
+  - path: /etc/ssh/sshd_config.d/00-devpod.conf
+    content: |
+      PermitRootLogin no
   - path: /etc/docker/daemon.json
     content: |
       {

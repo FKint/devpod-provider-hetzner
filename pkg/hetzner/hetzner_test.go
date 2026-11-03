@@ -101,3 +101,12 @@ func TestGenerateUserData(t *testing.T) {
 	assert.Contains(t, out, `- "ssh-ed25519 AAAA test"`)
 	assert.Contains(t, out, "ufw --force enable")
 }
+
+func TestGenerateUserDataSSHDHardening(t *testing.T) {
+	buf, err := generateUserData("ssh-ed25519 AAAA test", 1)
+	assert.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "/etc/ssh/sshd_config.d/00-devpod.conf")
+	assert.Contains(t, out, "systemctl restart ssh || systemctl restart sshd")
+}
