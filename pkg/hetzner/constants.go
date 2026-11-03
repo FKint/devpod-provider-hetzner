@@ -41,4 +41,7 @@ const (
 	// statusTimeout bounds how long the CLI waits for a machine to reach a status.
 	statusTimeout = 5 * time.Minute
 	statusPoll    = time.Second
+	// volumeDetachTimeout bounds how long Create waits for the volume of a deleted
+	// server to be released before it can be attached to the new one.
+	volumeDetachTimeout = 2 * time.Minute
 )

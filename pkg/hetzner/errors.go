@@ -25,6 +25,7 @@ var (
 	ErrProvisioningFailed   = errors.New("server provisioning failed")
 	ErrServerBusy           = errors.New("server is busy")
 	ErrDiskTooSmall         = errors.New("disk size too small")
+	ErrVolumeAttached       = errors.New("volume is attached to another server")
 	errSSHAuth              = errors.New("ssh authentication failed")
 	ErrBadSSHKey            = errors.New("bad ssh key")
 	ErrMultipleServersFound = func(name string) error {
