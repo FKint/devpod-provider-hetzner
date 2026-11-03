@@ -26,6 +26,7 @@ import (
 var allMachineEnvs = []string{
 	EnvPersistDocker, EnvContainerdImageStore, EnvBuildCacheSize, EnvPruneImagesAfter,
 	EnvPruneAnonymousVolumes, EnvSwapSize, EnvContainersMemoryHigh, EnvContainersMemoryMax, EnvContainersSwapMax,
+	EnvVolumeFormat,
 }
 
 func clearMachineEnv(t *testing.T) {
@@ -46,6 +47,7 @@ func TestMachineFromEnvDefaults(t *testing.T) {
 		BuildCacheSize:        "5GB",
 		PruneImagesAfter:      "168h",
 		PruneAnonymousVolumes: true,
+		VolumeFormat:          "xfs",
 		SwapSizeBytes:         8 << 30,
 		ContainersMemoryHigh:  "infinity",
 		ContainersMemoryMax:   "90%",
@@ -64,11 +66,13 @@ func TestMachineFromEnvOverrides(t *testing.T) {
 	t.Setenv(EnvContainersMemoryHigh, "6G")
 	t.Setenv(EnvContainersMemoryMax, "infinity")
 	t.Setenv(EnvContainersSwapMax, "2G")
+	t.Setenv(EnvVolumeFormat, "ext4")
 
 	m, err := MachineFromEnv()
 	assert.NoError(t, err)
 	assert.Equal(t, Machine{
 		BuildCacheSize:       "500MB",
+		VolumeFormat:         "ext4",
 		ContainersMemoryHigh: "6G",
 		ContainersMemoryMax:  "infinity",
 		ContainersSwapMax:    "2G",
@@ -86,6 +90,7 @@ func TestMachineFromEnvInvalid(t *testing.T) {
 		EnvContainersMemoryHigh:  {"85", "101%", "6GB", "6G\nMemoryMax=1"},
 		EnvContainersMemoryMax:   {"lots"},
 		EnvContainersSwapMax:     {"half"},
+		EnvVolumeFormat:          {"btrfs", "XFS", "xfs;"},
 	} {
 		for _, v := range values {
 			clearMachineEnv(t)
@@ -102,9 +107,10 @@ func TestMachineFromEnvInvalid(t *testing.T) {
 // with MachineFromEnv on typical values.
 func TestMachinePatterns(t *testing.T) {
 	for pattern, values := range map[string]map[string]bool{
-		PatternDockerSize:  {DefaultBuildCacheSize: true, "500mb": true, "5": false, "5 GB": false},
-		PatternPruneAge:    {DefaultPruneImagesAfter: true, "never": true, "1h30m": true, "7d": false, "": false},
-		PatternWholeNumber: {DefaultSwapSize: true, "0": true, "8G": false, "-1": false},
+		PatternDockerSize:   {DefaultBuildCacheSize: true, "500mb": true, "5": false, "5 GB": false},
+		PatternPruneAge:     {DefaultPruneImagesAfter: true, "never": true, "1h30m": true, "7d": false, "": false},
+		PatternWholeNumber:  {DefaultSwapSize: true, "0": true, "8G": false, "-1": false},
+		PatternVolumeFormat: {"xfs": true, "ext4": true, "btrfs": false, "xfs ext4": false},
 		PatternSystemdMemory: {
 			DefaultContainersMemoryHigh: true, DefaultContainersMemoryMax: true, DefaultContainersSwapMax: true,
 			"6G": true, "85": false,

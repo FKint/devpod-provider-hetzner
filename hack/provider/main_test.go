@@ -51,6 +51,7 @@ func TestBuildConfigIsValidProvider(t *testing.T) {
 		options.EnvPersistDocker, options.EnvContainerdImageStore, options.EnvBuildCacheSize,
 		options.EnvPruneImagesAfter, options.EnvPruneAnonymousVolumes, options.EnvSwapSize,
 		options.EnvContainersMemoryHigh, options.EnvContainersMemoryMax, options.EnvContainersSwapMax,
+		options.EnvVolumeFormat,
 	}
 	var grouped []string
 	for _, g := range parsed.OptionGroups {

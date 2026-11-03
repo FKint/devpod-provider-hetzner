@@ -3,7 +3,8 @@
 mounts:
   - - /dev/disk/by-id/scsi-0HC_Volume_{{ .VolumeID }}
     - /home/{{ .Username }}
-    - ext4
+    # xfs on new volumes, ext4 on volumes created by earlier versions
+    - auto
     # No online discard: it slows every delete on the network volume. Freed
     # blocks are trimmed once per boot instead (see runcmd).
     - noatime,nofail,defaults
@@ -43,6 +44,9 @@ runcmd:
   # before its drop-in is written, so restart both, containerd first. runcmd
   # doesn't stop on errors, so fail provisioning explicitly instead.
   - mountpoint -q /home/{{ .Username }} || exit 1
+  # Grow the filesystem if the volume was enlarged (DISK_SIZE); a no-op otherwise.
+  # ext4 volumes also get their root-reserved blocks cut from 5% to 1%.
+  - "case $(findmnt -n -o FSTYPE /home/{{ .Username }}) in xfs) xfs_growfs /home/{{ .Username }};; ext4) resize2fs /dev/disk/by-id/scsi-0HC_Volume_{{ .VolumeID }}; tune2fs -m 1 /dev/disk/by-id/scsi-0HC_Volume_{{ .VolumeID }};; esac || true"
   - systemctl daemon-reload
   - systemctl restart containerd && systemctl restart docker || exit 1
   # Clean up before DevPod connects (it waits for cloud-init), so this can't

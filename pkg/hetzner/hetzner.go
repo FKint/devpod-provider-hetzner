@@ -221,7 +221,7 @@ func (h *Hetzner) Create(
 			Location:  req.Location,
 			Name:      req.Name,
 			Size:      diskSize,
-			Format:    new("ext4"),
+			Format:    new(machine.VolumeFormat),
 			Automount: new(false),
 			Labels:    req.Labels,
 		})
@@ -238,6 +238,8 @@ func (h *Hetzner) Create(
 		}
 
 		log.Default.Info("Volume successfully created")
+	} else {
+		h.growVolume(ctx, volume, diskSize)
 	}
 
 	// Generate the config init

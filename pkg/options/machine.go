@@ -38,6 +38,7 @@ const (
 	EnvContainersMemoryHigh  = "CONTAINERS_MEMORY_HIGH"
 	EnvContainersMemoryMax   = "CONTAINERS_MEMORY_MAX"
 	EnvContainersSwapMax     = "CONTAINERS_SWAP_MAX"
+	EnvVolumeFormat          = "VOLUME_FORMAT"
 )
 
 // Defaults for the machine options, shared with the generated provider.yaml.
@@ -58,6 +59,12 @@ const (
 	DefaultContainersSwapMax = "50%"
 )
 
+// DefaultVolumeFormat is the filesystem of newly created volumes. XFS beat ext4
+// on the Cloud Volume in testing (about 1.8x the synced small-write rate, a much
+// better read tail latency), has no fixed inode limit, and supports reflinks,
+// which make uv's clone mode work between mounts.
+const DefaultVolumeFormat = "xfs"
+
 // PruneNever disables the image prune at start.
 const PruneNever = "never"
 
@@ -73,6 +80,7 @@ const (
 	PatternSystemdMemory = `^(\d+(\.\d+)?%|\d+[KMGT]|infinity)$`
 	PatternPruneAge      = `^((?i)never|(\d+(\.\d+)?(h|m|s))+)$`
 	PatternWholeNumber   = `^\d+$`
+	PatternVolumeFormat  = `^(xfs|ext4)$`
 )
 
 var (
@@ -97,6 +105,9 @@ type Machine struct {
 	PruneImagesAfter string
 	// PruneAnonymousVolumes removes unused anonymous volumes at start.
 	PruneAnonymousVolumes bool
+	// VolumeFormat is the filesystem of a newly created volume ("xfs" or "ext4").
+	// An existing volume keeps its filesystem.
+	VolumeFormat string
 	// SwapSizeBytes is the swap file size on the local disk; 0 disables swap.
 	SwapSizeBytes int64
 	// ContainersMemoryHigh, ContainersMemoryMax and ContainersSwapMax cap all
@@ -146,6 +157,11 @@ func MachineFromEnv() (Machine, error) {
 		m.PruneImagesAfter = ""
 	} else if d, perr := time.ParseDuration(m.PruneImagesAfter); perr != nil || d <= 0 {
 		fail(EnvPruneImagesAfter, m.PruneImagesAfter, "want a duration such as 168h, or never")
+	}
+
+	m.VolumeFormat = get(EnvVolumeFormat, DefaultVolumeFormat)
+	if !regexp.MustCompile(PatternVolumeFormat).MatchString(m.VolumeFormat) {
+		fail(EnvVolumeFormat, m.VolumeFormat, "want xfs or ext4")
 	}
 
 	swap := get(EnvSwapSize, DefaultSwapSize)

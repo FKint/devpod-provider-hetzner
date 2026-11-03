@@ -180,6 +180,7 @@ func BuildConfig(
 				DefaultVisible: true,
 				Options: []string{
 					"DISK_SIZE",
+					options.EnvVolumeFormat,
 					"DISK_IMAGE",
 					"MACHINE_TYPE",
 				},
@@ -230,9 +231,19 @@ fi`,
 				Local:       true,
 			},
 			"DISK_SIZE": {
-				Description: "The disk size in GB.",
-				Default:     "30",
-				Local:       true,
+				Description: "The volume size in GB. Raising it grows an existing volume (and its filesystem) on the next start; " +
+					"it never shrinks.",
+				Default: "40",
+				Local:   true,
+				Mutable: true,
+			},
+			options.EnvVolumeFormat: {
+				Description: "The filesystem of a newly created volume. An existing volume keeps its filesystem. " +
+					"xfs is faster than ext4 on Hetzner volumes and supports file clones (uv's clone mode).",
+				Default:           options.DefaultVolumeFormat,
+				Enum:              types.OptionEnumArray{{Value: "xfs"}, {Value: "ext4"}},
+				ValidationPattern: options.PatternVolumeFormat,
+				Local:             true,
 			},
 			"DISK_IMAGE": {
 				Description: "The disk image to use.",
