@@ -149,7 +149,7 @@ func BuildConfig(
 	checksums map[string]string,
 	defaultRegion string,
 	regions types.OptionEnumArray,
-	defaultMachineType string,
+	defaultType string,
 	machineTypes types.OptionEnumArray,
 ) provider.ProviderConfig {
 	releaseURLBase := fmt.Sprintf("https://github.com/FKint/devpod-provider-hetzner/releases/download/%s", version)
@@ -228,7 +228,7 @@ fi`,
 			},
 			"MACHINE_TYPE": {
 				Description: "The machine type to use.",
-				Default:     defaultMachineType,
+				Default:     defaultType,
 				Enum:        machineTypes,
 				Local:       true,
 			},
@@ -285,7 +285,7 @@ func checkMachineTypeOffered(def string, offered types.OptionEnumArray) error {
 		}
 	}
 
-	return fmt.Errorf("default MACHINE_TYPE %q is not offered by Hetzner any more (%d offered); update defaultMachineType", def, len(offered))
+	return fmt.Errorf("default MACHINE_TYPE %q is not offered by Hetzner, or is deprecated (%d offered); update defaultMachineType", def, len(offered))
 }
 
 // File hashes a given file to a sha256 string
