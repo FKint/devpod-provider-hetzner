@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM golang:1.25 AS builder
+FROM golang:1.27 AS builder
 ARG GIT_COMMIT
 ARG GIT_REPO="github.com/FKint/devpod-provider-hetzner"
 ARG PROJECT_NAME="devpod-provider-hetzner"
