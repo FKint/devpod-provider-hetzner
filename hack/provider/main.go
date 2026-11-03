@@ -296,8 +296,8 @@ fi`,
 				options.DefaultContainersMemoryMax, nil, options.PatternSystemdMemory, memoryMessage),
 			options.EnvContainersSwapMax: machineOption(
 				"Swap all containers together may use, so some stays for the host and a runaway container "+
-					"reaches the memory limit (and is killed) sooner. A percentage of RAM (50%), a size (4G) or infinity.",
-				options.DefaultContainersSwapMax, nil, options.PatternSystemdMemory, memoryMessage),
+					"reaches the memory limit (and is killed) sooner. A size (4G) or infinity.",
+				options.DefaultContainersSwapMax, nil, options.PatternSystemdSize, "Use a size such as 4G, or infinity."),
 			"INACTIVITY_TIMEOUT": {
 				Description: "If defined, will automatically stop the VM after the inactivity period.",
 				Default:     "10m",

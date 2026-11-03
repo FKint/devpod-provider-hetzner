@@ -226,7 +226,7 @@ func TestGenerateUserDataOOMProtection(t *testing.T) {
 	assert.Contains(t, slice, "MemoryMax=90%")
 	// Measured: a throttle zone (MemoryHigh) below MemoryMax let a runaway container hang for minutes
 	assert.Contains(t, slice, "MemoryHigh=infinity\n")
-	assert.Contains(t, slice, "MemorySwapMax=50%\n")
+	assert.Contains(t, slice, "MemorySwapMax=4G\n")
 }
 
 func TestGenerateUserDataDockerOnVolume(t *testing.T) {
@@ -259,7 +259,7 @@ func TestGenerateUserDataDockerOnVolume(t *testing.T) {
 	_, written := cfg.WriteFiles["/etc/containerd/config.toml"]
 	assert.False(t, written, "containerd's config.toml must not be overwritten")
 	containerd := cfg.WriteFiles["/etc/systemd/system/containerd.service.d/10-devpod-volume.conf"]
-	assert.Contains(t, containerd, "ExecStart=\nExecStart=/usr/bin/containerd --root /home/devpod/.devpod/containerd\n")
+	assert.Contains(t, containerd, "ExecStart=\nExecStart=/usr/bin/env containerd --root /home/devpod/.devpod/containerd\n")
 
 	for _, unit := range []string{"docker", "containerd"} {
 		assert.Contains(t, cfg.WriteFiles["/etc/systemd/system/"+unit+".service.d/10-devpod-volume.conf"],
@@ -289,8 +289,9 @@ func TestGenerateUserDataDockerStartOrder(t *testing.T) {
 	for name, i := range map[string]int{"install": install, "mountpoint": mounted, "restart": restart} {
 		assert.NotEqual(t, -1, i, name)
 	}
-	assert.Less(t, install, mounted)
-	assert.Less(t, mounted, restart)
+	// Docker is not installed or started without the volume
+	assert.Less(t, mounted, install)
+	assert.Less(t, install, restart)
 
 	// runcmd doesn't stop on errors, so the critical steps must fail explicitly
 	assert.True(t, strings.HasSuffix(cfg.RunCmd[mounted], "|| exit 1"))
@@ -307,7 +308,8 @@ func TestGenerateUserDataBootCleanup(t *testing.T) {
 	// never touch named volumes or (stopped) containers of another workspace.
 	allowed := []string{
 		"docker image prune --all --force --filter until=168h || true",
-		"docker volume prune --force || true",
+		// Only from Docker 23 on: older versions also prune unused named volumes
+		"docker info 2>/dev/null | awk -F'[ .]+' '/Server Version/ {exit !($4 >= 23)}' && docker volume prune --force || true",
 	}
 	var prunes []string
 	for i, c := range cfg.RunCmd {
