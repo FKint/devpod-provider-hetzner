@@ -78,7 +78,6 @@ done
 # skip for development builds (eg, PRs from forks); releases must fail loudly
 if [[ -z "${HCLOUD_TOKEN}" && "${RELEASE_VERSION}" == "development" ]]; then
   echo "HCLOUD_TOKEN not set - skipping provider.yaml generation for development build"
-  exit 0
+else
+  go run "${PROVIDER_ROOT}/hack/provider/main.go" ${RELEASE_VERSION} > "${PROVIDER_ROOT}/dist/provider.yaml"
 fi
-
-go run "${PROVIDER_ROOT}/hack/provider/main.go" ${RELEASE_VERSION} > "${PROVIDER_ROOT}/dist/provider.yaml"

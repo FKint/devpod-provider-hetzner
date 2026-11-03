@@ -33,6 +33,8 @@ import (
 
 const (
 	osLinux   = "linux"
+	osDarwin  = "darwin"
+	osWindows = "windows"
 	archAMD64 = "amd64"
 	archARM64 = "arm64"
 )
@@ -252,19 +254,19 @@ fi`,
 					Checksum: checksum["CHECKSUM_LINUX_ARM64"],
 				},
 				{
-					OS:       "darwin",
+					OS:       osDarwin,
 					Arch:     archAMD64,
 					Path:     fmt.Sprintf("%s/devpod-provider-hetzner-darwin-amd64", releaseURLBase),
 					Checksum: checksum["CHECKSUM_DARWIN_AMD64"],
 				},
 				{
-					OS:       "darwin",
+					OS:       osDarwin,
 					Arch:     archARM64,
 					Path:     fmt.Sprintf("%s/devpod-provider-hetzner-darwin-arm64", releaseURLBase),
 					Checksum: checksum["CHECKSUM_DARWIN_ARM64"],
 				},
 				{
-					OS:       "windows",
+					OS:       osWindows,
 					Arch:     archAMD64,
 					Path:     fmt.Sprintf("%s/devpod-provider-hetzner-windows-amd64.exe", releaseURLBase),
 					Checksum: checksum["CHECKSUM_WINDOWS_AMD64"],

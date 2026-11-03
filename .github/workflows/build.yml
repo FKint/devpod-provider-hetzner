@@ -77,24 +77,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Fork PRs are excluded by the job-level `if`, so missing secrets here
+      # are a misconfiguration and must fail rather than silently skip e2e.
       - name: Check e2e secrets
-        id: secrets
         run: |
-          if [ -n "${HCLOUD_TOKEN}" ] && [ -n "${SSH_KEY}" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            echo "::error::HCLOUD_TOKEN and SSH_KEY secrets are required to release"
+          if [ -z "${HCLOUD_TOKEN}" ] || [ -z "${SSH_KEY}" ]; then
+            echo "::error::HCLOUD_TOKEN and SSH_KEY secrets are required to run e2e"
             exit 1
-          else
-            echo "::warning::HCLOUD_TOKEN/SSH_KEY secrets not set - skipping e2e"
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
           fi
 
       - uses: hetznercloud/setup-hcloud@v1
-        if: steps.secrets.outputs.enabled == 'true'
 
       - name: Set up SSH keys
-        if: steps.secrets.outputs.enabled == 'true'
         run: |
           mkdir -p "${MACHINE_FOLDER}"
           printf '%s\n' "${SSH_KEY_PUB}" > "${MACHINE_FOLDER}/sshkey.pub"
@@ -103,45 +97,41 @@ jobs:
           ls -la "${MACHINE_FOLDER}"
 
       - name: Set up Go
-        if: steps.secrets.outputs.enabled == 'true'
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
       - run: go build -o provider .
-        if: steps.secrets.outputs.enabled == 'true'
 
       - name: Create command
-        if: steps.secrets.outputs.enabled == 'true'
         run: ./provider create
 
       - name: Run command
-        if: steps.secrets.outputs.enabled == 'true'
         env:
           COMMAND: hostname
-        run: ./provider command | grep ${MACHINE_ID}
+        run: |
+          set -o pipefail
+          ./provider command | grep -F -- "${MACHINE_ID}"
 
       - name: Stop command
-        if: steps.secrets.outputs.enabled == 'true'
         run: ./provider stop
 
       - name: Start command
-        if: steps.secrets.outputs.enabled == 'true'
         run: ./provider start
 
       - name: Run command
-        if: steps.secrets.outputs.enabled == 'true'
         env:
           COMMAND: hostname
-        run: ./provider command | grep ${MACHINE_ID}
+        run: |
+          set -o pipefail
+          ./provider command | grep -F -- "${MACHINE_ID}"
 
       - name: Delete command
-        if: steps.secrets.outputs.enabled == 'true'
         run: ./provider delete
 
       # This can fail due to resources failing to detach properly
       - name: Ensure destruction
-        if: ${{ always() && steps.secrets.outputs.enabled == 'true' }}
+        if: ${{ always() }}
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 10
