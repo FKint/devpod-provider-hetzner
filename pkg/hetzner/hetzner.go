@@ -478,7 +478,8 @@ func generateUserData(_, publicKey string, volumeID int64) (*bytes.Buffer, error
 }
 
 // actionTimeout bounds how long we wait for Hetzner actions to complete.
-const actionTimeout = time.Minute
+// Server creation with attached volumes can exceed a minute on a busy API.
+const actionTimeout = 5 * time.Minute
 
 // waitForActions blocks until all actions succeed, one fails, or the timeout/context expires.
 func (h *Hetzner) waitForActions(ctx context.Context, actions ...*hcloud.Action) error {

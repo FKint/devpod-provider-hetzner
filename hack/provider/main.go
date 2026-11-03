@@ -110,7 +110,7 @@ func main() {
 		checksums,
 		"nbg1",
 		regions,
-		"cpx22",
+		"cx32",
 		machineTypes,
 	))
 	if err != nil {
