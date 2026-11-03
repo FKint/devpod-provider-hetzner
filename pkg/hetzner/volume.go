@@ -25,15 +25,11 @@ import (
 	"github.com/loft-sh/log"
 )
 
-// attachedLiveServer returns the server a volume is attached to, or nil if it is
-// attached to none or the server is gone or being deleted. Hetzner reports a
+// attachedLiveServer returns the server an attached volume is held by, or nil if
+// that server is gone or being deleted. Hetzner reports a
 // server delete as done before it has released its volumes, so for a short while
 // a volume can still point at a server that no longer exists.
 func (h *Hetzner) attachedLiveServer(ctx context.Context, volume *hcloud.Volume) (*hcloud.Server, error) {
-	if volume == nil || volume.Server == nil {
-		return nil, nil
-	}
-
 	server, _, err := h.client.Server.GetByID(ctx, volume.Server.ID)
 	if err != nil {
 		return nil, err

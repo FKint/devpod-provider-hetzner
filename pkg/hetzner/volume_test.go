@@ -46,8 +46,7 @@ type fakeAPI struct {
 	serverCalls atomic.Int32
 }
 
-func (f *fakeAPI) handler(t *testing.T) http.Handler {
-	t.Helper()
+func (f *fakeAPI) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/volumes", func(w http.ResponseWriter, _ *http.Request) {
 		n := int(f.volumeCalls.Add(1))
@@ -75,7 +74,7 @@ func (f *fakeAPI) handler(t *testing.T) http.Handler {
 
 func (f *fakeAPI) hetzner(t *testing.T) *Hetzner {
 	t.Helper()
-	handler := f.handler(t)
+	handler := f.handler()
 	// Serve in-process rather than on a local port, so it works in restricted sandboxes
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		rec := httptest.NewRecorder()
