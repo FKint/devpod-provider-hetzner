@@ -10,12 +10,15 @@ on:
       - main
   workflow_dispatch:
 permissions:
-  contents: write
-  packages: write
+  contents: read
   pull-requests: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   commitlint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
     steps:
@@ -27,6 +30,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,12 +61,15 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Fork PRs have no access to secrets and must never create billable resources
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     env:
       HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
       DISK_IMAGE: docker-ce
       DISK_SIZE: "30"
       MACHINE_ID: test-${{ github.run_id }}
-      MACHINE_FOLDER: ${{ github.workspace }}./ssh
+      MACHINE_FOLDER: ${{ github.workspace }}/.ssh
       MACHINE_TYPE: "cx22"
       REGION: "nbg1"
       SSH_KEY_PUB: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK2sB1n570BgGJ3+I0Dgzxhlf9ukc+Hp+C/zsIH4J8Xm vscode@df47ba471beb"
@@ -70,47 +77,71 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check e2e secrets
+        id: secrets
+        run: |
+          if [ -n "${HCLOUD_TOKEN}" ] && [ -n "${SSH_KEY}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "::error::HCLOUD_TOKEN and SSH_KEY secrets are required to release"
+            exit 1
+          else
+            echo "::warning::HCLOUD_TOKEN/SSH_KEY secrets not set - skipping e2e"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: hetznercloud/setup-hcloud@v1
+        if: steps.secrets.outputs.enabled == 'true'
 
       - name: Set up SSH keys
+        if: steps.secrets.outputs.enabled == 'true'
         run: |
-          mkdir -p ${MACHINE_FOLDER}
-          echo ${SSH_KEY_PUB} > ${MACHINE_FOLDER}/sshkey.pub
-          echo ${SSH_KEY} > ${MACHINE_FOLDER}/sshkey
-          ls -la ${MACHINE_FOLDER}
+          mkdir -p "${MACHINE_FOLDER}"
+          printf '%s\n' "${SSH_KEY_PUB}" > "${MACHINE_FOLDER}/sshkey.pub"
+          printf '%s\n' "${SSH_KEY}" > "${MACHINE_FOLDER}/sshkey"
+          chmod 600 "${MACHINE_FOLDER}/sshkey"
+          ls -la "${MACHINE_FOLDER}"
 
       - name: Set up Go
+        if: steps.secrets.outputs.enabled == 'true'
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
       - run: go build -o provider .
+        if: steps.secrets.outputs.enabled == 'true'
 
       - name: Create command
+        if: steps.secrets.outputs.enabled == 'true'
         run: ./provider create
 
       - name: Run command
+        if: steps.secrets.outputs.enabled == 'true'
         env:
           COMMAND: hostname
         run: ./provider command | grep ${MACHINE_ID}
 
       - name: Stop command
+        if: steps.secrets.outputs.enabled == 'true'
         run: ./provider stop
 
       - name: Start command
+        if: steps.secrets.outputs.enabled == 'true'
         run: ./provider start
 
       - name: Run command
+        if: steps.secrets.outputs.enabled == 'true'
         env:
           COMMAND: hostname
         run: ./provider command | grep ${MACHINE_ID}
 
       - name: Delete command
+        if: steps.secrets.outputs.enabled == 'true'
         run: ./provider delete
 
       # This can fail due to resources failing to detach properly
       - name: Ensure destruction
-        if: ${{ always() }}
+        if: ${{ always() && steps.secrets.outputs.enabled == 'true' }}
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 10
@@ -119,6 +150,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     outputs:
       is_tag: ${{ steps.branch-name.outputs.is_tag }}
     env:
@@ -169,6 +201,10 @@ jobs:
 
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      packages: write
     needs:
       - build
       - commitlint
