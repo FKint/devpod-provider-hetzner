@@ -73,8 +73,8 @@ jobs:
     timeout-minutes: 30
     # Secrets and approval gating live in this environment
     environment: Hetzner E2E
-    # Fork PRs have no access to secrets and must never create billable resources
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    # Fork PRs and Dependabot PRs have no access to secrets and must never create billable resources
+    if: ${{ github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     env:
       HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
       DISK_IMAGE: docker-ce

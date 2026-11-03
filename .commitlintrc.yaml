@@ -1,2 +1,5 @@
 extends:
   - "@commitlint/config-conventional"
+rules:
+  # Dependabot commit bodies contain long release-note lines
+  body-max-line-length: [0]
