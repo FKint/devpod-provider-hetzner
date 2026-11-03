@@ -285,7 +285,8 @@ func checkMachineTypeOffered(def string, offered types.OptionEnumArray) error {
 		}
 	}
 
-	return fmt.Errorf("default MACHINE_TYPE %q is not offered by Hetzner, or is deprecated (%d offered); update defaultMachineType", def, len(offered))
+	return fmt.Errorf("default MACHINE_TYPE %q is not offered by Hetzner, or is deprecated (%d offered); update defaultMachineType",
+		def, len(offered))
 }
 
 // File hashes a given file to a sha256 string
