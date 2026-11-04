@@ -3,3 +3,5 @@ extends:
 rules:
   # Dependabot commit bodies contain long release-note lines
   body-max-line-length: [0]
+  # Allow subjects that start with an acronym, e.g. "feat: XFS for new volumes"
+  subject-case: [2, never, [upper-case, pascal-case, start-case]]

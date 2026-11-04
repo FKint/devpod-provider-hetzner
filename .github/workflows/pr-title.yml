@@ -1,0 +1,29 @@
+name: PR title
+# Squash merges use the PR title as the commit subject on main, but the commitlint
+# job in build.yml only sees the individual branch commits. Lint the title here,
+# with the same rules, and re-run when it is edited (build.yml does not).
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - reopened
+      - synchronize
+permissions:
+  contents: read
+jobs:
+  commitlint-title:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Lint the PR title
+        env:
+          # Via env, never interpolated into the script: the title is attacker-controlled
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          printf '%s\n' "$PR_TITLE" | npx --yes \
+            -p @commitlint/cli@21.2.4 \
+            -p @commitlint/config-conventional@21.2.4 \
+            commitlint --config .commitlintrc.yaml
