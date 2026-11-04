@@ -11,14 +11,18 @@
     "vscode": {
       "settings": {
         "editor.formatOnSave": true,
-        "editor.rulers": [80],
+        "editor.rulers": [
+          80
+        ],
         "yaml.schemas": {
           "https://json.schemastore.org/github-workflow.json": [
             ".github/workflows/*.{yml,yaml}"
           ]
         },
         "go.lintTool": "golangci-lint",
-        "go.lintFlags": ["--fast"]
+        "go.lintFlags": [
+          "--fast"
+        ]
       },
       "extensions": [
         "donjayamanne.git-extension-pack",
