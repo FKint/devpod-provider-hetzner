@@ -14,63 +14,38 @@
 # limitations under the License.
 
 
-set -e
+set -euo pipefail
 
-export GO111MODULE=on
-# export GOFLAGS=-mod=vendor
+# The platforms listed in hack/provider/main.go; keep the two in sync
+PLATFORMS="${PROVIDER_BUILD_PLATFORMS:-linux windows darwin}"
+ARCHS="${PROVIDER_BUILD_ARCHS:-amd64 arm64}"
 
-PROVIDER_ROOT=$(git rev-parse --show-toplevel)
-COMMIT_HASH=$(git rev-parse --short HEAD 2>/dev/null)
-DATE=$(date "+%Y-%m-%d")
-BUILD_PLATFORM=$(uname -a | awk '{print tolower($1);}')
+cd "$(git rev-parse --show-toplevel)"
 
-echo "Current working directory is $(pwd)"
-echo "PATH is $PATH"
-echo "GOPATH is $GOPATH"
+# Set by CI; a local build has no version to stamp
+GIT_REPO="${GIT_REPO:-github.com/FKint/devpod-provider-hetzner}"
+RELEASE_VERSION="${RELEASE_VERSION:-development}"
+GIT_COMMIT="${GIT_COMMIT:-$(git rev-parse HEAD)}"
+LDFLAGS="-w -s -X ${GIT_REPO}/cmd.Version=${RELEASE_VERSION} -X ${GIT_REPO}/cmd.GitCommit=${GIT_COMMIT}"
 
-if [[ "$(pwd)" != "${PROVIDER_ROOT}" ]]; then
-  echo "you are not in the root of the repo" 1>&2
-  echo "please cd to ${PROVIDER_ROOT} before running this script" 1>&2
-  exit 1
-fi
+mkdir -p dist
 
-GO_BUILD_CMD="go build"
-GO_BUILD_LDFLAGS="-w -s -X ${GIT_REPO}/cmd.Version=${RELEASE_VERSION} -X ${GIT_REPO}/cmd.GitCommit=${GIT_COMMIT}"
+for OS in ${PLATFORMS}; do
+  for ARCH in ${ARCHS}; do
+    # No Windows on ARM binary is published
+    if [[ "${OS}" == "windows" && "${ARCH}" == "arm64" ]]; then
+      echo "Skipping ${OS}/${ARCH}"
+      continue
+    fi
 
-if [[ -z "${PROVIDER_BUILD_PLATFORMS}" ]]; then
-    PROVIDER_BUILD_PLATFORMS="linux windows darwin"
-fi
-
-if [[ -z "${PROVIDER_BUILD_ARCHS}" ]]; then
-    PROVIDER_BUILD_ARCHS="amd64 arm64"
-fi
-
-# Create the dist directory
-mkdir -p "${PROVIDER_ROOT}/dist"
-
-for OS in ${PROVIDER_BUILD_PLATFORMS[@]}; do
-  for ARCH in ${PROVIDER_BUILD_ARCHS[@]}; do
     NAME="devpod-provider-hetzner-${OS}-${ARCH}"
     if [[ "${OS}" == "windows" ]]; then
       NAME="${NAME}.exe"
     fi
 
-    # darwin 386 is deprecated and shouldn't be used anymore
-    if [[ "${ARCH}" == "386" && "${OS}" == "darwin" ]]; then
-        echo "Building for ${OS}/${ARCH} not supported."
-        continue
-    fi
-
-    # arm64 build is only supported for darwin
-    if [[ "${ARCH}" == "arm64" && "${OS}" == "windows" ]]; then
-        echo "Building for ${OS}/${ARCH} not supported."
-        continue
-    fi
-
     echo "Building for ${OS}/${ARCH}"
-    GOARCH=${ARCH} GOOS=${OS} CGO_ENABLED=0 ${GO_BUILD_CMD} -ldflags "${GO_BUILD_LDFLAGS}"\
-      -o "${PROVIDER_ROOT}/dist/${NAME}" main.go
-    shasum -a 256 "${PROVIDER_ROOT}/dist/${NAME}" | cut -d ' ' -f 1 > "${PROVIDER_ROOT}/dist/${NAME}".sha256
+    GOOS="${OS}" GOARCH="${ARCH}" CGO_ENABLED=0 go build -ldflags "${LDFLAGS}" -o "dist/${NAME}" .
+    shasum -a 256 "dist/${NAME}" | cut -d ' ' -f 1 > "dist/${NAME}.sha256"
   done
 done
 
@@ -78,10 +53,10 @@ done
 # SKIP_PROVIDER_YAML=true and generates it in the publish job instead, so the
 # token is only exposed to the release environment. Otherwise only skip for
 # development builds (eg, local builds); releases must fail loudly
-if [[ "${SKIP_PROVIDER_YAML}" == "true" ]]; then
+if [[ "${SKIP_PROVIDER_YAML:-}" == "true" ]]; then
   echo "SKIP_PROVIDER_YAML set - skipping provider.yaml generation"
-elif [[ -z "${HCLOUD_TOKEN}" && "${RELEASE_VERSION}" == "development" ]]; then
+elif [[ -z "${HCLOUD_TOKEN:-}" && "${RELEASE_VERSION}" == "development" ]]; then
   echo "HCLOUD_TOKEN not set - skipping provider.yaml generation for development build"
 else
-  go run "${PROVIDER_ROOT}/hack/provider/main.go" ${RELEASE_VERSION} > "${PROVIDER_ROOT}/dist/provider.yaml"
+  go run ./hack/provider "${RELEASE_VERSION}" > dist/provider.yaml
 fi

@@ -115,56 +115,51 @@ func sshKeyName(machineID, random string) string {
 func (h *Hetzner) BuildServerOptions(
 	ctx context.Context,
 	opts *options.Options,
-) (serverCreateOpts *hcloud.ServerCreateOpts, publicKeyStr *string, privateKey []byte, err error) {
+) (serverCreateOpts *hcloud.ServerCreateOpts, publicKeyStr string, privateKey []byte, err error) {
 	log.Default.Debugf("Machine folder path: %s", opts.MachineFolder)
 
 	publicKeyBase, err := ssh.GetPublicKeyBase(opts.MachineFolder)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, "", nil, err
 	}
 
 	publicKey, err := base64.StdEncoding.DecodeString(publicKeyBase)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, "", nil, err
 	}
 
 	privateKey, err = ssh.GetPrivateKeyRawBase(opts.MachineFolder)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, "", nil, err
 	}
 
 	location, _, err := h.client.Location.GetByName(ctx, opts.Region)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, "", nil, err
 	}
 	if location == nil {
-		return nil, nil, nil, ErrUnknownRegion
+		return nil, "", nil, ErrUnknownRegion
 	}
 
 	serverType, _, err := h.client.ServerType.GetByName(ctx, opts.MachineType)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, "", nil, err
 	}
 	if serverType == nil {
-		return nil, nil, nil, ErrUnknownMachineID
+		return nil, "", nil, ErrUnknownMachineID
 	}
 
 	sshKey, err := h.upsertPublicKey(ctx, string(publicKey), opts.MachineID)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, "", nil, err
 	}
 
-	arch := hcloud.ArchitectureX86
-	if strings.HasPrefix(opts.MachineType, "cax") {
-		// Machines starting "cax" are ARM64
-		arch = hcloud.ArchitectureARM
-	}
-	image, _, err := h.client.Image.GetByNameAndArchitecture(ctx, opts.DiskImage, arch)
+	image, _, err := h.client.Image.GetByNameAndArchitecture(ctx, opts.DiskImage, serverType.Architecture)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, "", nil, err
 	}
 	if image == nil {
-		return nil, nil, nil, ErrUnknownDiskImage
+		return nil, "", nil, ErrUnknownDiskImage
 	}
 
 	return &hcloud.ServerCreateOpts{
@@ -179,7 +174,7 @@ func (h *Hetzner) BuildServerOptions(
 		SSHKeys: []*hcloud.SSHKey{
 			sshKey,
 		},
-	}, new(string(publicKey)), privateKey, nil
+	}, string(publicKey), privateKey, nil
 }
 
 func (h *Hetzner) Create(

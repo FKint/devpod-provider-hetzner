@@ -32,8 +32,6 @@ runcmd:
 {{- end }}
   # Secure SSHD
   # PermitRootLogin is set by the sshd_config.d drop-in below
-  # Without an Include for sshd_config.d the drop-in is ignored; first match wins, so put it on top
-  - "grep -qsE '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config.d/' /etc/ssh/sshd_config || sed -i '1i PermitRootLogin no' /etc/ssh/sshd_config"
   # The unit is "ssh" on Debian/Ubuntu and "sshd" elsewhere
   - "if systemctl cat ssh.service >/dev/null 2>&1; then systemctl restart ssh; else systemctl restart sshd; fi"
   - [rm, -f, /root/.ssh/authorized_keys]
@@ -47,7 +45,7 @@ runcmd:
   # ends this script; other failures don't) rather than run Docker without it.
   - mountpoint -q /home/{{ .Username }} || exit 1
   # Install Docker
-  - if docker ; then echo "Docker already installed"; else curl -fsSL https://get.docker.com | sh; fi
+  - if command -v docker >/dev/null; then echo "Docker already installed"; else curl -fsSL https://get.docker.com | sh; fi
   # Grow the filesystem if the volume was enlarged (DISK_SIZE); a no-op otherwise.
   # ext4 volumes also get their root-reserved blocks cut from 5% to 1%.
   - "case $(findmnt -n -o FSTYPE /home/{{ .Username }}) in xfs) xfs_growfs /home/{{ .Username }};; ext4) d=$(findmnt -n -o SOURCE /home/{{ .Username }}); resize2fs $d; tune2fs -m 1 $d;; esac || echo 'devpod: could not grow the filesystem'"
