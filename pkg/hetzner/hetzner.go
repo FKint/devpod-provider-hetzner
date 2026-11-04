@@ -25,6 +25,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"os/exec"
@@ -77,15 +78,18 @@ func (h *Hetzner) pollInterval() time.Duration {
 	return h.interval(statusPoll)
 }
 
+// NewClient builds the Hetzner API client, shared with the provider.yaml generator.
+func NewClient(token string) *hcloud.Client {
+	return hcloud.NewClient(
+		hcloud.WithToken(token),
+		// The default client has no timeout, so a hung connection would block forever.
+		// A timeout is retried by the client like any other transient network error.
+		hcloud.WithHTTPClient(&http.Client{Timeout: apiRequestTimeout}),
+	)
+}
+
 func NewHetzner(token string) *Hetzner {
-	return &Hetzner{
-		client: hcloud.NewClient(
-			hcloud.WithToken(token),
-			// The default client has no timeout, so a hung connection would block forever.
-			// A timeout is retried by the client like any other transient network error.
-			hcloud.WithHTTPClient(&http.Client{Timeout: apiRequestTimeout}),
-		),
-	}
+	return &Hetzner{client: NewClient(token)}
 }
 
 func (h *Hetzner) upsertPublicKey(ctx context.Context, publicKey, machineID string) (*hcloud.SSHKey, error) {
@@ -99,7 +103,14 @@ func (h *Hetzner) upsertPublicKey(ctx context.Context, publicKey, machineID stri
 		return nil, err
 	}
 
-	if sshKey == nil {
+	if sshKey != nil {
+		// Delete and rollback remove keys by their machineId label, so a key labelled
+		// for another machine would be taken from under it. A key without the label
+		// is the user's own and is never deleted.
+		if owner, ok := sshKey.Labels[labelMachineID]; ok && owner != machineID {
+			return nil, fmt.Errorf("%w: key %s (%s) belongs to machine %s", ErrSSHKeyInUse, sshKey.Name, fingerprint, owner)
+		}
+	} else {
 		name := sshKeyName(machineID, rand.Text())
 
 		log.Default.Infof("Uploading SSH key: %s", name)
@@ -219,29 +230,32 @@ func (h *Hetzner) Create(
 ) (err error) {
 	log.Default.Info("Creating DevPod instance")
 
+	// Remove anything created by this call if it doesn't succeed. A volume that
+	// already existed holds the user's data, so it is never removed here. The SSH
+	// key was uploaded before Create (and is re-uploaded on every create/start), so
+	// it goes on any failure of a new server, however early: this is registered
+	// before the first lookup so that one failing doesn't leave the key behind.
+	var createdServer *hcloud.Server
+	var createdVolume *hcloud.Volume
+	startingExisting := false
+	defer func() {
+		if err != nil && !startingExisting {
+			// The context may be what failed (e.g. Ctrl-C), so don't reuse it
+			h.rollback(context.WithoutCancel(ctx), req.Name, createdServer, createdVolume)
+		}
+	}()
+
 	// The server may already exist (e.g. "start" on a machine that is powered off or still booting)
 	existing, err := h.GetByName(ctx, req.Name)
 	if err != nil {
 		return err
 	}
 	if existing != nil {
+		startingExisting = true
 		log.Default.Info("Server already exists: machine options (PERSIST_DOCKER, SWAP_SIZE, ...) and a larger DISK_SIZE " +
 			"only apply when the server is created, i.e. on the next start after a stop")
 		return h.startExisting(ctx, existing, privateKeyFile)
 	}
-
-	// Remove anything created by this call if it doesn't succeed. A volume that
-	// already existed holds the user's data, so it is never removed here. The SSH
-	// key was uploaded before Create (and is re-uploaded on every create/start), so
-	// it goes on any failure from here on, however early.
-	var createdServer *hcloud.Server
-	var createdVolume *hcloud.Volume
-	defer func() {
-		if err != nil {
-			// The context may be what failed (e.g. Ctrl-C), so don't reuse it
-			h.rollback(context.WithoutCancel(ctx), req.Name, createdServer, createdVolume)
-		}
-	}()
 
 	// Refuse before waiting on anything
 	if err := checkSwapFits(req.ServerType, machine); err != nil {
@@ -353,7 +367,17 @@ func (h *Hetzner) createServerWithRetry(ctx context.Context, req *hcloud.ServerC
 // the volumes) to finish. The server is stored in created as soon as the API returns it,
 // even when an error follows, so the caller can remove it.
 func (h *Hetzner) createServer(ctx context.Context, req *hcloud.ServerCreateOpts, created **hcloud.Server) error {
-	server, _, err := h.client.Server.Create(ctx, *req)
+	// Marks this attempt's server, so a lookup after a lost response can tell it from
+	// one a concurrent run created under the same name
+	attempt := rand.Text()
+	opts := *req
+	opts.Labels = maps.Clone(req.Labels)
+	if opts.Labels == nil {
+		opts.Labels = map[string]string{}
+	}
+	opts.Labels[labelCreateAttempt] = attempt
+
+	server, _, err := h.client.Server.Create(ctx, opts)
 	if server.Server != nil {
 		// Track it even when err is set: the API may have created it before failing
 		*created = server.Server
@@ -361,8 +385,9 @@ func (h *Hetzner) createServer(ctx context.Context, req *hcloud.ServerCreateOpts
 	if err != nil {
 		if server.Server == nil {
 			// The server may exist although the response got lost (e.g. a request
-			// timeout). The name was free when Create started, so it is ours.
-			if existing, lookupErr := h.GetByName(context.WithoutCancel(ctx), req.Name); lookupErr == nil && existing != nil {
+			// timeout). It is ours only if it carries this attempt's label.
+			existing, lookupErr := h.GetByName(context.WithoutCancel(ctx), req.Name)
+			if lookupErr == nil && existing != nil && existing.Labels[labelCreateAttempt] == attempt {
 				*created = existing
 			}
 		}
@@ -443,6 +468,15 @@ func checkSwapFits(serverType *hcloud.ServerType, machine *options.Machine) erro
 // rollback removes resources created by a failed Create. Failures are logged, not returned,
 // so the original error is what the caller sees.
 func (h *Hetzner) rollback(ctx context.Context, name string, server *hcloud.Server, volume *hcloud.Volume) {
+	// Independent of the rest: whether or not the server or volume could be
+	// removed, the key must not stay behind in the project.
+	defer func() {
+		if err := h.deleteSSHKeys(ctx, name); err != nil {
+			log.Default.Errorf("Unable to delete SSH keys for %s, please remove them manually (label %s=%s): %v",
+				name, labelMachineID, name, err)
+		}
+	}()
+
 	if server != nil {
 		log.Default.Warnf("Rolling back: deleting server %s", server.Name)
 
@@ -460,10 +494,6 @@ func (h *Hetzner) rollback(ctx context.Context, name string, server *hcloud.Serv
 		if err := h.deleteVolume(ctx, volume.Name); err != nil {
 			log.Default.Errorf("Unable to delete volume %s, please remove it manually: %v", volume.Name, err)
 		}
-	}
-
-	if err := h.deleteSSHKeys(ctx, name); err != nil {
-		log.Default.Errorf("Unable to delete SSH keys for %s: %v", name, err)
 	}
 }
 
@@ -1017,9 +1047,16 @@ type userDataParams struct {
 }
 
 func generateUserData(publicKey string, volumeID int64, machine *options.Machine) (*bytes.Buffer, error) {
+	// Only the type and key data go into the quoted YAML scalar: the comment is free
+	// text and a quote or backslash in it would break the whole cloud-config.
+	pk, _, _, _, err := cryptoSsh.ParseAuthorizedKey([]byte(publicKey))
+	if err != nil {
+		return nil, fmt.Errorf("parse public ssh key: %w", err)
+	}
+
 	buf := new(bytes.Buffer)
 	if err := userDataTemplate.Execute(buf, userDataParams{
-		PublicKey: strings.TrimSuffix(publicKey, "\n"),
+		PublicKey: strings.TrimSpace(string(cryptoSsh.MarshalAuthorizedKey(pk))),
 		VolumeID:  strconv.FormatInt(volumeID, 10),
 		Username:  SSHUsername,
 		Machine:   machine,

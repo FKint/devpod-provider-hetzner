@@ -27,6 +27,7 @@ var (
 	ErrServerBusy           = errors.New("server is busy")
 	ErrDiskTooSmall         = errors.New("disk size too small")
 	ErrVolumeAttached       = errors.New("volume is attached to another server")
+	ErrSSHKeyInUse          = errors.New("ssh key is used by another machine")
 	ErrSwapTooLarge         = errors.New("swap does not fit on the server's local disk")
 	errSSHAuth              = errors.New("ssh authentication failed")
 	errUnreachable          = errors.New("ssh server unreachable")

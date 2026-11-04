@@ -95,9 +95,9 @@ func TestMachineFromEnvInvalid(t *testing.T) {
 		EnvPersistDocker:         {"yes please"},
 		EnvContainerdImageStore:  {"maybe"},
 		EnvBuildCacheSize:        {"5", "5 GB", "5GiB", "-1GB", "5GB; rm -rf /"},
-		EnvPruneImagesAfter:      {"7d", "0", "0h", "0s", "0.0m", "-1h", "1h || true", "+168h", "1h30m5ms", "1\u00b5s"},
+		EnvPruneImagesAfter:      {"7d", "0", "0h", "0s", "0.0m", "-1h", "1h || true", "+168h", "1h30m5ms", "0h0m", "99999999999999h", "1\u00b5s"},
 		EnvPruneAnonymousVolumes: {"2"},
-		EnvSwapSize:              {"-1", "8G", "1000"},
+		EnvSwapSize:              {"-1", "8G", "257", "1000"},
 		EnvContainersMemoryHigh:  {"85", "101%", "6GB", "6G\nMemoryMax=1", zeroPercent, zeroSize, "85.555%"},
 		EnvContainersMemoryMax:   {"lots"},
 		// A percentage is not scaled by RAM for swap, so only sizes are accepted
@@ -125,9 +125,14 @@ func TestMachinePatterns(t *testing.T) {
 		PatternDockerSize: {DefaultBuildCacheSize: true, "500mb": true, "5": false, "5 GB": false},
 		PatternPruneAge: {
 			DefaultPruneImagesAfter: true, "never": true, "1h30m": true, "0h30m": true, "1h0m": true, "0.5s": true,
-			"7d": false, "": false, "0h": false, "0s": false, "0.0m": false, "0h0m": false, "00s": false,
+			"7d": false, "": false, "168": false, "h": false, "-1h": false,
+			// Zero and overflow are ParseDuration's to refuse, see TestMachineFromEnvInvalid
+			"0h": true,
 		},
-		PatternWholeNumber:  {DefaultSwapSize: true, "0": true, "8G": false, "-1": false},
+		PatternSwapSize: {
+			DefaultSwapSize: true, "0": true, "256": true, "007": true, "257": false, "300": false, "1000": false,
+			"8G": false, "-1": false, "": false,
+		},
 		PatternVolumeFormat: {"xfs": true, "ext4": true, "btrfs": false, "xfs ext4": false},
 		PatternSystemdMemory: {
 			DefaultContainersMemoryHigh: true, DefaultContainersMemoryMax: true, "6G": true, "85.25%": true,

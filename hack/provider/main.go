@@ -24,23 +24,18 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
-	"time"
 
+	"github.com/FKint/devpod-provider-hetzner/pkg/hetzner"
 	"github.com/FKint/devpod-provider-hetzner/pkg/options"
-	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 	"github.com/loft-sh/devpod/pkg/provider"
 	"github.com/loft-sh/devpod/pkg/types"
 	"sigs.k8s.io/yaml"
 )
 
 const (
-	// apiRequestTimeout bounds a single HTTP request to the Hetzner API
-	apiRequestTimeout = 30 * time.Second
-
 	archAMD64 = "amd64"
 	archARM64 = "arm64"
 
@@ -125,11 +120,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return errors.New("expected HCLOUD_TOKEN environment variable")
 	}
 
-	h := hcloud.NewClient(
-		hcloud.WithToken(token),
-		// The default client has no timeout, so a hung connection would block the release forever
-		hcloud.WithHTTPClient(&http.Client{Timeout: apiRequestTimeout}),
-	)
+	h := hetzner.NewClient(token)
 
 	locations, err := h.Location.All(ctx)
 	if err != nil {
@@ -322,7 +313,7 @@ fi`,
 				options.DefaultPruneAnonymousVolumes, boolEnum, "", ""),
 			options.EnvSwapSize: machineOption(
 				"Swap file size in GB on the server's local disk. 0 disables swap.",
-				options.DefaultSwapSize, nil, options.PatternWholeNumber, "Use whole GB, e.g. 8, or 0 for no swap."),
+				options.DefaultSwapSize, nil, options.PatternSwapSize, "Use whole GB, e.g. 8, or 0 for no swap."),
 			options.EnvContainersMemoryHigh: machineOption(
 				"Memory above which all containers together are throttled and pushed to swap: "+
 					"a percentage of RAM (85%), a size (6G) or infinity (no throttling, the default: a throttled "+

@@ -61,7 +61,7 @@ func (h *Hetzner) waitForVolumeDetached(ctx context.Context, name string) (*hclo
 		switch {
 		case err != nil && ctx.Err() != nil:
 			return false, ctx.Err()
-		case err != nil && (!isTransient(err) || failures >= detachCheckRetries):
+		case err != nil && (!isTransient(ctx, err) || failures >= detachCheckRetries):
 			return false, err
 		case err != nil:
 			failures++
@@ -90,11 +90,17 @@ func (h *Hetzner) waitForVolumeDetached(ctx context.Context, name string) (*hclo
 	return result, nil
 }
 
-// isTransient reports whether an API error is worth retrying: network trouble,
+// isTransient reports whether an API error is worth retrying, given the caller's ctx: network trouble,
 // rate limiting, a server-side hiccup or a resource that is locked by another
 // action (conflict). Anything else (bad token, duplicate name, ...) will not fix
 // itself.
-func isTransient(err error) bool {
+func isTransient(ctx context.Context, err error) bool {
+	// An expired or cancelled caller context also reads as a (timeout) net.Error,
+	// and retrying it is pointless
+	if ctx.Err() != nil {
+		return false
+	}
+
 	var netErr net.Error
 	if errors.As(err, &netErr) {
 		return true
