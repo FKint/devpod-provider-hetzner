@@ -84,13 +84,13 @@ func (f *fakeStopAPI) handler() http.Handler {
 	mux.HandleFunc("/actions", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("id") == strconv.Itoa(failedActionID) {
 			failed := map[string]any{
-				keyID: failedActionID, keyStatus: statusError, "command": "delete_server",
-				keyError: map[string]any{"code": codeUnknownError, "message": "boom"},
+				keyID: failedActionID, keyStatus: statusError, keyCommand: "delete_server",
+				keyError: map[string]any{keyCode: codeUnknownError, keyMessage: "boom"},
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"actions": []any{failed}})
+			_ = json.NewEncoder(w).Encode(map[string]any{keyActions: []any{failed}})
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"actions": []any{action[keyAction]}})
+		_ = json.NewEncoder(w).Encode(map[string]any{keyActions: []any{action[keyAction]}})
 	})
 	mux.HandleFunc("/servers/5", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {

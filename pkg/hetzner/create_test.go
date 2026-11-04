@@ -145,7 +145,7 @@ func TestCreateRollsBackEverythingItCreated(t *testing.T) {
 	}{
 		{name: "volume creation fails", fail: []string{reqCreateVolume}},
 		{name: "server creation fails", fail: []string{reqCreateServer}},
-		{name: "cloud-init fails", statuses: []string{"error"}},
+		{name: "cloud-init fails", statuses: []string{statusError}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -168,7 +168,7 @@ func TestCreateRollsBackEverythingItCreated(t *testing.T) {
 
 func TestCreateReportsTheOriginalErrorAfterRollback(t *testing.T) {
 	cloud := newFakeCloud()
-	_, key := newFakeSSHD(t, "error")
+	_, key := newFakeSSHD(t, statusError)
 	assert.ErrorIs(t, createMachine(t, cloud, key, 10), ErrProvisioningFailed)
 }
 
@@ -176,7 +176,7 @@ func TestCreateRollbackKeepsAnExistingVolume(t *testing.T) {
 	cloud := newFakeCloud()
 	cloud.seedVolume(machineName, 10)
 	cloud.seedKey(machineName)
-	_, key := newFakeSSHD(t, "error")
+	_, key := newFakeSSHD(t, statusError)
 
 	require.Error(t, createMachine(t, cloud, key, 10))
 
@@ -203,7 +203,7 @@ func TestCreateRollbackStillRunsWhenTheContextIsGone(t *testing.T) {
 func TestCreateRollbackKeepsTheVolumeWhenTheServerCannotBeDeleted(t *testing.T) {
 	cloud := newFakeCloud()
 	cloud.fail(reqDeleteServer)
-	_, key := newFakeSSHD(t, "error")
+	_, key := newFakeSSHD(t, statusError)
 
 	err := createMachine(t, cloud, key, 10)
 	assert.ErrorIs(t, err, ErrProvisioningFailed, "the caller sees the original error, not the cleanup's")
@@ -218,7 +218,7 @@ func TestCreateRollbackStillRemovesKeysWhenTheVolumeCannotBeDeleted(t *testing.T
 	cloud := newFakeCloud()
 	cloud.seedKey(machineName)
 	cloud.fail(reqDeleteVolume)
-	_, key := newFakeSSHD(t, "error")
+	_, key := newFakeSSHD(t, statusError)
 
 	assert.ErrorIs(t, createMachine(t, cloud, key, 10), ErrProvisioningFailed)
 
@@ -311,4 +311,62 @@ func TestCreateReportsAnAPIFailureWithoutCreatingAnything(t *testing.T) {
 
 	assert.Error(t, createMachine(t, cloud, key, 10))
 	assert.Zero(t, cloud.count(reqCreateVolume)+cloud.count(reqCreateServer))
+}
+
+// Hetzner sometimes fails to attach the volume to a new server; the volume is fine,
+// so Create retries once with a fresh server instead of failing the whole start.
+func TestCreateRetriesWithANewServerWhenTheVolumeAttachFails(t *testing.T) {
+	cloud := newFakeCloud()
+	cloud.attachFailures = 1
+	_, key := newFakeSSHD(t, "done")
+
+	require.NoError(t, createMachine(t, cloud, key, 10))
+
+	assert.Equal(t, 2, cloud.count(reqCreateServer))
+	assert.Equal(t, 1, cloud.count(reqDeleteServer), "the server whose attach failed is removed")
+	assert.Zero(t, cloud.count(reqDeleteVolume), "the volume is kept across the retry")
+	assert.Equal(t, 1, cloud.count(reqCreateVolume))
+
+	servers, volumes, _ := cloud.left()
+	assert.Equal(t, []string{machineName}, servers)
+	assert.Equal(t, []string{machineName}, volumes)
+	for _, v := range cloud.volumes {
+		assert.NotZero(t, v.Server, "the volume is attached to the server that was kept")
+	}
+}
+
+func TestCreateGivesUpAfterTheAttachFailedAgain(t *testing.T) {
+	cloud := newFakeCloud()
+	cloud.attachFailures = serverCreateAttempts
+	_, key := newFakeSSHD(t, "done")
+
+	err := createMachine(t, cloud, key, 10)
+
+	assert.True(t, isVolumeAttachFailure(err), "got %v", err)
+	assert.Equal(t, serverCreateAttempts, cloud.count(reqCreateServer))
+	assertNothingLeft(t, cloud)
+}
+
+func TestCreateDoesNotRetryOtherServerFailures(t *testing.T) {
+	cloud := newFakeCloud()
+	cloud.fail(reqCreateServer)
+	_, key := newFakeSSHD(t)
+
+	assert.Error(t, createMachine(t, cloud, key, 10))
+	assert.Equal(t, 1, cloud.count(reqCreateServer))
+	assertNothingLeft(t, cloud)
+}
+
+func TestCreateKeepsTheOriginalErrorWhenTheRetryCannotRemoveTheFailedServer(t *testing.T) {
+	cloud := newFakeCloud()
+	cloud.attachFailures = 1
+	cloud.fail(reqDeleteServer)
+	_, key := newFakeSSHD(t)
+
+	err := createMachine(t, cloud, key, 10)
+
+	assert.True(t, isVolumeAttachFailure(err), "got %v", err)
+	assert.Equal(t, 1, cloud.count(reqCreateServer), "no second server while the first one is still there")
+	servers, _, _ := cloud.left()
+	assert.Equal(t, []string{machineName}, servers, "left for the user to remove, as the log says")
 }

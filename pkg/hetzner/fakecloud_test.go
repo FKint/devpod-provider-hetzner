@@ -84,6 +84,8 @@ type fakeCloud struct {
 	serverStatusOnCreate string
 	// unknown makes the lookup of that kind find nothing: "location", "server_type" or "image"
 	unknown map[string]bool
+	// attachFailures is how many server creations report a failed attach_volume action
+	attachFailures int
 	// lastServerBody is the body of the last server create request
 	lastServerBody cloudObject
 }
@@ -209,7 +211,7 @@ type route func(f *fakeCloud, w http.ResponseWriter, r *http.Request)
 // routes maps "METHOD /path" (ids as "*") to its handler.
 var routes = map[string]route{
 	"GET /actions": func(_ *fakeCloud, w http.ResponseWriter, _ *http.Request) {
-		reply(w, cloudObject{"actions": []any{}})
+		reply(w, cloudObject{keyActions: []any{}})
 	},
 	"GET /locations": func(f *fakeCloud, w http.ResponseWriter, r *http.Request) {
 		f.lookup(w, r, "location", "locations", cloudObject{keyID: 1, keyName: fakeRegion})
@@ -279,7 +281,7 @@ func (f *fakeCloud) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func reply(w http.ResponseWriter, body cloudObject) { _ = json.NewEncoder(w).Encode(body) }
 
 func fakeAction() cloudObject {
-	return cloudObject{keyID: 1, keyStatus: statusSuccess, "progress": 100, "command": "fake"}
+	return cloudObject{keyID: 1, keyStatus: statusSuccess, keyProgress: 100, keyCommand: "fake"}
 }
 
 func pathID(r *http.Request) int64 {
@@ -416,7 +418,15 @@ func (f *fakeCloud) createServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	f.servers[s.ID] = s
-	reply(w, cloudObject{keyServer: f.serverObject(s), keyAction: fakeAction(), "next_actions": []any{}})
+	next := []any{}
+	if f.attachFailures > 0 {
+		f.attachFailures--
+		next = append(next, cloudObject{
+			keyID: 2, keyStatus: statusError, keyCommand: "attach_volume", keyProgress: 100,
+			keyError: cloudObject{keyCode: codeUnknownError, keyMessage: "attaching the volume failed"},
+		})
+	}
+	reply(w, cloudObject{keyServer: f.serverObject(s), keyAction: fakeAction(), "next_actions": next})
 }
 
 func (f *fakeCloud) deleteServer(w http.ResponseWriter, r *http.Request) {

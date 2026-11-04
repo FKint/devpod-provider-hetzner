@@ -32,9 +32,13 @@ const (
 	otherName   = "other"
 
 	keyAction   = "action"
+	keyActions  = "actions"
+	keyCode     = "code"
+	keyCommand  = "command"
 	keyError    = "error"
 	keyID       = "id"
 	keyLabels   = "labels"
+	keyMessage  = "message"
 	keyName     = "name"
 	keyProgress = "progress"
 	keyServer   = "server"
@@ -78,5 +82,5 @@ func newTestClient(t *testing.T, handler http.Handler) *hcloud.Client {
 // writeAPIError answers like the Hetzner API does for a failed request.
 func writeAPIError(w http.ResponseWriter, status int, code, message string) {
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{keyError: map[string]any{"code": code, "message": message}})
+	_ = json.NewEncoder(w).Encode(map[string]any{keyError: map[string]any{keyCode: code, keyMessage: message}})
 }

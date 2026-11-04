@@ -178,7 +178,7 @@ func TestWaitForProvisionedRetriesWhileUnreachable(t *testing.T) {
 }
 
 func TestWaitForProvisionedFailsWhenCloudInitKeepsFailing(t *testing.T) {
-	d, key := newFakeSSHD(t, "error")
+	d, key := newFakeSSHD(t, statusError)
 	h := &Hetzner{poll: time.Millisecond}
 	err := h.waitForProvisioned(boundedCtx(t), testServer(), key, false)
 	assert.ErrorIs(t, err, ErrProvisioningFailed)
@@ -186,7 +186,7 @@ func TestWaitForProvisionedFailsWhenCloudInitKeepsFailing(t *testing.T) {
 }
 
 func TestWaitForProvisionedToleratesATransientCloudInitError(t *testing.T) {
-	d, key := newFakeSSHD(t, "error", "error", statusRunning, "error", "error", "done")
+	d, key := newFakeSSHD(t, statusError, statusError, statusRunning, statusError, statusError, "done")
 	h := &Hetzner{poll: time.Millisecond}
 	assert.NoError(t, h.waitForProvisioned(boundedCtx(t), testServer(), key, false))
 	assert.Equal(t, 6, cloudInitChecks(d))
