@@ -41,7 +41,8 @@ const (
 	EnvVolumeFormat          = "VOLUME_FORMAT"
 )
 
-// MachineEnvs lists every machine option, for grouping and for tests.
+// MachineEnvs lists the machine options of the "Docker options" group, for grouping
+// and for tests. EnvVolumeFormat is not in it: it is grouped with the Hetzner options.
 var MachineEnvs = []string{
 	EnvPersistDocker, EnvContainerdImageStore, EnvBuildCacheSize,
 	EnvPruneImagesAfter, EnvPruneAnonymousVolumes, EnvSwapSize,
