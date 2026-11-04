@@ -740,15 +740,23 @@ func (h *Hetzner) deleteVolume(ctx context.Context, name string) error {
 	}
 
 	if volume.Server != nil {
-		// Detach volume
-		action, _, err := h.client.Volume.Detach(ctx, volume)
+		// A volume that points at a deleted server is being released and is locked
+		// meanwhile, so detaching it fails; only a live holder needs a detach.
+		live, err := h.attachedLiveServer(ctx, volume)
 		if err != nil {
-			return fmt.Errorf("detach volume: %w", err)
+			return err
 		}
 
-		if err := h.waitForActions(ctx, action); err != nil {
-			log.Default.Errorf("Error in volume detach action: %s, %s", action.Command, err)
-			return err
+		if live != nil {
+			action, _, err := h.client.Volume.Detach(ctx, volume)
+			if err != nil {
+				return fmt.Errorf("detach volume: %w", err)
+			}
+
+			if err := h.waitForActions(ctx, action); err != nil {
+				log.Default.Errorf("Error in volume detach action: %s, %s", action.Command, err)
+				return err
+			}
 		}
 	}
 
