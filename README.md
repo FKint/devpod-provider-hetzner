@@ -77,7 +77,11 @@ To test the provider workflow, you can run the CLI commands directly.
 | `init` | Initialise an instance | `go run . init` |
 | `start` | Start an instance | `go run . start` |
 | `status` | Retrieve the status of an instance | `go run . status` |
-| `stop` | Stop an instance | `go run . stop` |
+| `stop` | Stop an instance. Shuts the server down gracefully first, then deletes it (the volume is kept) | `go run . stop` |
+
+`stop --from-machine` is what the inactivity shutdown runs on the machine itself. A power-off there
+would kill the command before it could delete the server, so it stops the containers and syncs the
+disks instead.
 
 ### Testing in the DevPod ecosystem
 

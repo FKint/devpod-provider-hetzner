@@ -17,6 +17,8 @@
 package cmd
 
 import (
+	"context"
+
 	"github.com/FKint/devpod-provider-hetzner/pkg/hetzner"
 	"github.com/loft-sh/devpod/pkg/client"
 	"github.com/spf13/cobra"
@@ -27,10 +29,18 @@ var stopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop an instance",
 	RunE: func(_ *cobra.Command, _ []string) error {
-		return runAndWait((*hetzner.Hetzner).Stop, client.StatusStopped)
+		return runAndWait(func(h *hetzner.Hetzner, ctx context.Context, name string) error {
+			return h.Stop(ctx, name, fromMachine)
+		}, client.StatusStopped)
 	},
 }
 
+// fromMachine is set when the command runs on the machine it stops (the inactivity
+// shutdown), where the machine can't be powered off before the server is deleted.
+var fromMachine bool
+
 func init() {
+	stopCmd.Flags().BoolVar(&fromMachine, "from-machine", false,
+		"the command runs on the machine being stopped: stop the containers and sync instead of an ACPI shutdown")
 	rootCmd.AddCommand(stopCmd)
 }

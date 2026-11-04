@@ -41,4 +41,11 @@ const (
 	// statusTimeout bounds how long the CLI waits for a machine to reach a status.
 	statusTimeout = 5 * time.Minute
 	statusPoll    = time.Second
+	// shutdownTimeout bounds the wait for a graceful shutdown. It has to cover
+	// systemd's grace period for stopping container processes.
+	shutdownTimeout = 2 * time.Minute
+	// localStopTimeout bounds stopping containers and syncing on the machine itself.
+	localStopTimeout = 90 * time.Second
+	// containerStopGrace is the seconds each container gets to exit before it is killed.
+	containerStopGrace = 30
 )
