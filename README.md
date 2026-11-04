@@ -12,6 +12,8 @@ created by Simon Emms. All credit for the original work goes to the original aut
 <!-- toc -->
 - [Project status](#project-status)
 - [Usage](#usage)
+  - [Install](#install)
+  - [Updating](#updating)
   - [Persistent storage](#persistent-storage)
     - [Machine options](#machine-options)
     - [Per-workspace settings](#per-workspace-settings)
@@ -42,14 +44,66 @@ or to fix changes made by DevPod or Hetzner.
 
 ## Usage
 
-To use this provider in your DevPod setup, you will need to do the following steps:
+### Install
 
-1. See the [DevPod documentation](https://devpod.sh/docs/managing-providers/add-provider)
-   for how to add a provider
-1. Use the reference `FKint/devpod-provider-hetzner` to download the latest
-   release from GitHub
+1. [Install DevPod](https://devpod.sh/docs/getting-started/install)
 1. Get an [API token](https://docs.hetzner.com/cloud/api/getting-started/generating-api-token/)
-   from Hetzner with `read & write` access. This will be used to manage resources.
+   from Hetzner with `read & write` access. This is used to manage resources.
+1. Add the provider and make it the default:
+
+   ```shell
+   devpod provider add FKint/devpod-provider-hetzner
+   devpod provider use hetzner -o TOKEN=<your-hcloud-token>
+   ```
+
+   This downloads the latest GitHub release. To pin a version use
+   `FKint/devpod-provider-hetzner@v1.2.3`. In the DevPod desktop app, use
+   Providers → Add → Custom and enter the same reference. `TOKEN` is also read
+   from the `HETZNER_TOKEN` or `HETZNER_ACCESS_TOKEN` environment variable.
+
+1. Start a workspace:
+
+   ```shell
+   devpod up github.com/some/repo --provider hetzner
+   ```
+
+See the [DevPod documentation](https://devpod.sh/docs/managing-providers/add-provider)
+for more on managing providers. Region, server type and the other options are
+set the same way as `TOKEN`, with `devpod provider set-options hetzner -o KEY=VALUE`
+(see [Machine options](#machine-options)).
+
+### Updating
+
+Updating swaps the provider's config and binaries in place. Workspaces
+reference the provider only by name (`hetzner`), so they pick up the new
+version automatically and need no re-linking.
+
+```shell
+devpod provider update hetzner
+```
+
+With no source, DevPod re-downloads from the source the provider was added
+with. To switch to this fork from another source (for example the upstream
+[mrsimonemms/devpod-provider-hetzner](https://github.com/mrsimonemms/devpod-provider-hetzner)),
+or to pick a specific release, pass the source:
+
+```shell
+devpod provider update hetzner FKint/devpod-provider-hetzner
+devpod provider update hetzner FKint/devpod-provider-hetzner@v1.2.3
+```
+
+Notes:
+
+- Don't `devpod provider delete` and re-add the provider to update it: DevPod
+  refuses to delete a provider that still has workspaces.
+- Options the new version no longer defines are dropped, so check
+  `devpod provider options hetzner` afterwards. `update` re-runs provider
+  configuration; pass `--use=false` to skip that.
+- Existing servers keep their server type and disk; changed defaults only apply
+  to servers created after the update.
+- The provider finds a workspace's server and volume through the `machineId`
+  label it sets on every Hetzner resource, so resources created by a version
+  that did not set this label are not matched.
 
 ### Persistent storage
 
