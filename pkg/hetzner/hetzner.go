@@ -50,6 +50,8 @@ type cloudInit struct {
 
 type Hetzner struct {
 	client *hcloud.Client
+	// detachPoll is how often to check whether a volume was released; statusPoll if zero
+	detachPoll time.Duration
 }
 
 func NewHetzner(token string) *Hetzner {
@@ -191,7 +193,8 @@ func (h *Hetzner) Create(
 		return h.startExisting(ctx, existing, privateKeyFile)
 	}
 
-	volume, err := h.volumeByName(ctx, req.Name)
+	// A volume that belonged to the server just deleted by a stop may take a moment to be released
+	volume, err := h.waitForVolumeDetached(ctx, req.Name)
 	if err != nil {
 		return err
 	}
@@ -475,14 +478,20 @@ func (h *Hetzner) Status(ctx context.Context, name string) (client.Status, error
 	}
 	if server == nil {
 		// No server - check the volume
-		volume, err := h.volumeByName(ctx, name)
+		volume, live, err := h.volumeAndHolder(ctx, name)
 		if err != nil {
 			return client.StatusNotFound, err
-		} else if volume != nil {
-			return client.StatusStopped, nil
+		} else if volume == nil {
+			return client.StatusNotFound, nil
 		}
 
-		return client.StatusNotFound, nil
+		// The server delete finishes before its volume is released. Until then the
+		// machine can't be started (the volume would still be attached), so it isn't stopped yet.
+		if volume.Server != nil && live == nil {
+			return client.StatusBusy, nil
+		}
+
+		return client.StatusStopped, nil
 	}
 
 	switch server.Status {
