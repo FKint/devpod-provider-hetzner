@@ -1,0 +1,28 @@
+name: Sweep leaked e2e resources
+# Deletes Hetzner servers, volumes and SSH keys labelled machineId=test-* that are
+# older than an hour, i.e. left behind by e2e runs whose cleanup never ran
+# (for example a cancelled workflow).
+on:
+  schedule:
+    - cron: 17 * * * *
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+jobs:
+  sweep:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Holds the Hetzner token; the same environment as the e2e job
+    environment: Hetzner E2E
+    env:
+      HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: hetznercloud/setup-hcloud@28cdd3fc4a4a8013e86d57c7254be72df92fcc02 # v2.0.1
+
+      - name: Delete stale e2e resources
+        run: ./hack/hcloud_sweep.sh
