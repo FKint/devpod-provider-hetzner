@@ -100,9 +100,11 @@ const (
 	PatternSystemdMemory = `^((0*(100(\.0{1,2})?|[1-9]\d?(\.\d{1,2})?)|0+\.(\d[1-9]|[1-9]\d?))%|\d*[1-9]\d*[KMGT]|infinity)$`
 	// A size or infinity, for limits that systemd does not scale by RAM
 	PatternSystemdSize = `^(\d*[1-9]\d*[KMGT]|infinity)$`
-	// "never", or a duration (h, m, s) with at least one non-zero part
-	PatternPruneAge    = `^([Nn][Ee][Vv][Ee][Rr]|(\d+(\.\d+)?[hms])*(\d*[1-9]\d*(\.\d+)?|\d+\.\d*[1-9]\d*)[hms](\d+(\.\d+)?[hms])*)$`
-	PatternWholeNumber = `^\d+$`
+	// "never", or a duration made of h, m and s parts. Only the shape is checked
+	// here: whether it is above zero and fits a time.Duration is up to ParseDuration.
+	PatternPruneAge = `^([Nn][Ee][Vv][Ee][Rr]|(\d+(\.\d+)?[hms])+)$`
+	// Whole GB from 0 to maxSwapSizeGB
+	PatternSwapSize = `^0*(\d{1,2}|1\d\d|2[0-4]\d|25[0-6])$`
 	// The filesystem of a new volume
 	PatternVolumeFormat = `^(xfs|ext4)$`
 	// A process limit, or infinity
@@ -118,6 +120,7 @@ var (
 	systemdMemoryRe = regexp.MustCompile(PatternSystemdMemory)
 	systemdSizeRe   = regexp.MustCompile(PatternSystemdSize)
 	pruneAgeRe      = regexp.MustCompile(PatternPruneAge)
+	swapSizeRe      = regexp.MustCompile(PatternSwapSize)
 	volumeFormatRe  = regexp.MustCompile(PatternVolumeFormat)
 	tasksMaxRe      = regexp.MustCompile(PatternTasksMax)
 	cpuQuotaRe      = regexp.MustCompile(PatternCPUQuota)
@@ -193,20 +196,10 @@ func (p *envParser) pattern(name, def string, re *regexp.Regexp, want string) (s
 	return v, true
 }
 
-// limit reads a systemd memory limit.
+// limit reads a systemd limit. The pattern is the whole rule: it already refuses
+// zero (every container would fail on its first allocation) and percentages above 100.
 func (p *envParser) limit(name, def string, re *regexp.Regexp, want string) string {
-	v, ok := p.pattern(name, def, re, want)
-	if !ok || v == "infinity" {
-		return v
-	}
-	// The patterns guarantee a number. 0 would make every container fail on its first allocation.
-	n, _ := strconv.ParseFloat(strings.TrimRight(v, "%KMGT"), 64)
-	switch {
-	case n == 0:
-		p.fail(name, v, "must be above 0 (use infinity for no limit)")
-	case strings.HasSuffix(v, "%") && n > 100:
-		p.fail(name, v, "a percentage can't exceed 100%")
-	}
+	v, _ := p.pattern(name, def, re, want)
 
 	return v
 }
@@ -259,12 +252,12 @@ func (p *envParser) pruneAge() string {
 }
 
 func (p *envParser) swapBytes() int64 {
-	v := p.get(EnvSwapSize, DefaultSwapSize)
-	gb, err := strconv.ParseInt(v, 10, 64)
-	if err != nil || gb < 0 || gb > maxSwapSizeGB {
-		p.fail(EnvSwapSize, v, fmt.Sprintf("want whole GB between 0 (no swap) and %d", maxSwapSizeGB))
+	v, ok := p.pattern(EnvSwapSize, DefaultSwapSize, swapSizeRe,
+		fmt.Sprintf("want whole GB between 0 (no swap) and %d", maxSwapSizeGB))
+	if !ok {
 		return 0
 	}
+	gb, _ := strconv.ParseInt(v, 10, 64) // the pattern guarantees a small number
 
 	return gb << 30
 }

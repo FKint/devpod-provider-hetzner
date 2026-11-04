@@ -31,6 +31,10 @@ const (
 	machineName = "machine"
 	otherName   = "other"
 
+	// A valid ed25519 public key; the comment is not part of testPublicKeyData
+	testPublicKeyData = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMYMPf45N2zLPaI4SOxE4QJH/f4jhaLt7bSk75RVoIOA"
+	testPublicKey     = testPublicKeyData + " test"
+
 	keyAction   = "action"
 	keyActions  = "actions"
 	keyCode     = "code"

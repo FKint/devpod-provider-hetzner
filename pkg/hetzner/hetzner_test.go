@@ -100,17 +100,17 @@ func TestCloudInitStatus(t *testing.T) {
 }
 
 func TestGenerateUserData(t *testing.T) {
-	buf, err := generateUserData("ssh-ed25519 AAAA test\n", 42, defaultMachine(t))
+	buf, err := generateUserData(testPublicKey+"\n", 42, defaultMachine(t))
 	assert.NoError(t, err)
 
 	out := buf.String()
 	assert.Contains(t, out, "scsi-0HC_Volume_42")
-	assert.Contains(t, out, `- "ssh-ed25519 AAAA test"`)
+	assert.Contains(t, out, `- "`+testPublicKeyData+`"`)
 	assert.Contains(t, out, "ufw --force enable")
 }
 
 func TestGenerateUserDataSSHDHardening(t *testing.T) {
-	buf, err := generateUserData("ssh-ed25519 AAAA test", 1, defaultMachine(t))
+	buf, err := generateUserData(testPublicKey, 1, defaultMachine(t))
 	assert.NoError(t, err)
 
 	out := buf.String()
@@ -119,7 +119,7 @@ func TestGenerateUserDataSSHDHardening(t *testing.T) {
 }
 
 func TestGenerateUserDataIsValidYAML(t *testing.T) {
-	buf, err := generateUserData("ssh-ed25519 AAAA test", 1, defaultMachine(t))
+	buf, err := generateUserData(testPublicKey, 1, defaultMachine(t))
 	assert.NoError(t, err)
 
 	var cfg struct {
@@ -156,7 +156,7 @@ func defaultMachine(t *testing.T) *options.Machine {
 func renderUserData(t *testing.T, machine *options.Machine) renderedUserData {
 	t.Helper()
 
-	buf, err := generateUserData("ssh-ed25519 AAAA test\n", 1234, machine)
+	buf, err := generateUserData(testPublicKey+"\n", 1234, machine)
 	if !assert.NoError(t, err) {
 		t.FailNow()
 	}
@@ -430,7 +430,7 @@ func TestGenerateUserDataPruneAge(t *testing.T) {
 }
 
 func TestGenerateUserDataNoPackageRefresh(t *testing.T) {
-	buf, err := generateUserData("ssh-ed25519 AAAA test", 1, defaultMachine(t))
+	buf, err := generateUserData(testPublicKey, 1, defaultMachine(t))
 	assert.NoError(t, err)
 
 	var cfg map[string]any

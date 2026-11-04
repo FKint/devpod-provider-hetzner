@@ -58,7 +58,7 @@ func testMachineOptions(t *testing.T) *options.Machine {
 func createMachine(t *testing.T, cloud *fakeCloud, key []byte, diskSize int) error {
 	t.Helper()
 
-	return cloud.hetzner(t).Create(boundedCtx(t), testRequest(), diskSize, testMachineOptions(t), "ssh-ed25519 AAAA test", key)
+	return cloud.hetzner(t).Create(boundedCtx(t), testRequest(), diskSize, testMachineOptions(t), testPublicKey, key)
 }
 
 func assertNothingLeft(t *testing.T, cloud *fakeCloud) {
@@ -131,7 +131,7 @@ func TestCreateRefusesSwapThatDoesNotFitBeforeTouchingAnything(t *testing.T) {
 	machine := testMachineOptions(t)
 	machine.SwapSizeBytes = int64(fakeServerDisk) << 30
 
-	err := cloud.hetzner(t).Create(context.Background(), testRequest(), 10, machine, "ssh-ed25519 AAAA test", key)
+	err := cloud.hetzner(t).Create(context.Background(), testRequest(), 10, machine, testPublicKey, key)
 	assert.ErrorIs(t, err, ErrSwapTooLarge)
 	assert.Zero(t, cloud.count("GET /volumes"), "refused before waiting on anything")
 	assert.Zero(t, cloud.count(reqCreateVolume)+cloud.count(reqCreateServer))
@@ -194,7 +194,7 @@ func TestCreateRollbackStillRunsWhenTheContextIsGone(t *testing.T) {
 	// Ctrl-C or a deadline while waiting for provisioning must not leave billable resources
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
-	err := cloud.hetzner(t).Create(ctx, testRequest(), 10, testMachineOptions(t), "ssh-ed25519 AAAA test", key)
+	err := cloud.hetzner(t).Create(ctx, testRequest(), 10, testMachineOptions(t), testPublicKey, key)
 
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assertNothingLeft(t, cloud)

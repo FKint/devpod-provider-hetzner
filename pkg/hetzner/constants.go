@@ -21,8 +21,10 @@ import "time"
 
 const (
 	labelMachineID = "machineId"
-	SSHUsername    = "devpod"
-	SSHPort        = 22
+	// labelCreateAttempt marks the server of one create attempt
+	labelCreateAttempt = "createAttempt"
+	SSHUsername        = "devpod"
+	SSHPort            = 22
 
 	// maxSSHKeyNameIDLength is how much of the machine ID is used in an SSH key name.
 	maxSSHKeyNameIDLength = 24

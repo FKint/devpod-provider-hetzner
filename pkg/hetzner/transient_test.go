@@ -17,6 +17,7 @@
 package hetzner
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -27,18 +28,23 @@ import (
 )
 
 func TestIsTransient(t *testing.T) {
+	ctx := context.Background()
 	apiErr := func(code hcloud.ErrorCode) error { return hcloud.Error{Code: code} }
 
-	assert.True(t, isTransient(&net.DNSError{IsTimeout: true}), "network errors are retried")
-	assert.True(t, isTransient(fmt.Errorf("wrapped: %w", &net.DNSError{})))
-	assert.True(t, isTransient(apiErr(hcloud.ErrorCodeRateLimitExceeded)))
-	assert.True(t, isTransient(apiErr(hcloud.ErrorCodeTimeout)))
-	assert.True(t, isTransient(apiErr(hcloud.ErrorCodeServerError)))
-	assert.True(t, isTransient(apiErr(hcloud.ErrorCodeConflict)), "a locked resource is released by the action holding it")
-	assert.False(t, isTransient(apiErr(hcloud.ErrorCodeUnauthorized)))
-	assert.False(t, isTransient(apiErr(hcloud.ErrorCodeUniquenessError)), "a duplicate name stays a duplicate")
-	assert.False(t, isTransient(errors.New("boom")))
-	assert.False(t, isTransient(nil))
+	assert.True(t, isTransient(ctx, &net.DNSError{IsTimeout: true}), "network errors are retried")
+	assert.True(t, isTransient(ctx, fmt.Errorf("wrapped: %w", &net.DNSError{})))
+	assert.True(t, isTransient(ctx, apiErr(hcloud.ErrorCodeRateLimitExceeded)))
+	assert.True(t, isTransient(ctx, apiErr(hcloud.ErrorCodeTimeout)))
+	assert.True(t, isTransient(ctx, apiErr(hcloud.ErrorCodeServerError)))
+	assert.True(t, isTransient(ctx, apiErr(hcloud.ErrorCodeConflict)), "a locked resource is released by the action holding it")
+	assert.False(t, isTransient(ctx, apiErr(hcloud.ErrorCodeUnauthorized)))
+	assert.False(t, isTransient(ctx, apiErr(hcloud.ErrorCodeUniquenessError)), "a duplicate name stays a duplicate")
+	assert.False(t, isTransient(ctx, errors.New("boom")))
+	assert.False(t, isTransient(ctx, nil))
+
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	assert.False(t, isTransient(cancelled, &net.DNSError{IsTimeout: true}), "a caller that gave up is not retried")
 }
 
 func TestParseCloudInitStatusRejectsGarbage(t *testing.T) {
