@@ -235,11 +235,13 @@ func BuildConfig(
 			},
 		},
 		Options: map[string]*types.Option{
-			"TOKEN": {
+			"HCLOUD_TOKEN": {
 				Description: "The Hetzner API token to use.",
 				Required:    true,
 				Password:    true,
-				Command: `if [ ! -z "${HETZNER_TOKEN}" ]; then
+				Command: `if [ ! -z "${HCLOUD_TOKEN}" ]; then
+	echo ${HCLOUD_TOKEN}
+elif [ ! -z "${HETZNER_TOKEN}" ]; then
 	echo ${HETZNER_TOKEN}
 elif [ ! -z "${HETZNER_ACCESS_TOKEN}" ]; then
 	echo ${HETZNER_ACCESS_TOKEN}

@@ -51,6 +51,16 @@ To use this provider in your DevPod setup, you will need to do the following ste
 1. Get an [API token](https://docs.hetzner.com/cloud/api/getting-started/generating-api-token/)
    from Hetzner with `read & write` access. This will be used to manage resources.
 
+The API token is the `HCLOUD_TOKEN` provider option, for example
+`devpod provider use hetzner -o HCLOUD_TOKEN=<token>`. If unset, DevPod falls
+back to the `HCLOUD_TOKEN`, `HETZNER_TOKEN` or `HETZNER_ACCESS_TOKEN`
+environment variable.
+
+> Earlier releases named this option `TOKEN`. When you
+> `devpod provider update hetzner`, DevPod drops options the new version no
+> longer defines, so set `HCLOUD_TOKEN` again afterwards (or export it in the
+> environment).
+
 ### Persistent storage
 
 `stop` deletes the server; only its Hetzner Cloud volume (sized by
