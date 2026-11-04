@@ -98,6 +98,9 @@ jobs:
       MACHINE_TYPE: "cpx22"
       REGION: "nbg1"
       SSH_KEY: ${{ secrets.SSH_KEY }}
+      # Non-default machine options, checked on the server by machine_options.sh
+      SWAP_SIZE: "2"
+      CONTAINERS_SWAP_MAX: "1G"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -138,6 +141,12 @@ jobs:
       - name: Run command
         run: ./hack/e2e/assert_hostname.sh
 
+      - name: Machine options reach the server
+        run: ./hack/e2e/machine_options.sh
+
+      - name: Create Docker state on the volume
+        run: ./hack/e2e/persistence.sh before
+
       - name: Stop command
         run: ./provider stop
 
@@ -152,6 +161,12 @@ jobs:
 
       - name: Run command
         run: ./hack/e2e/assert_hostname.sh
+
+      - name: Machine options reach the recreated server
+        run: ./hack/e2e/machine_options.sh
+
+      - name: Docker state survived the stop and start
+        run: ./hack/e2e/persistence.sh after
 
       - name: Delete command
         run: ./provider delete
