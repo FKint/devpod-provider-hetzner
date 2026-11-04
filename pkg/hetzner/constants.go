@@ -30,6 +30,14 @@ const (
 	// actionTimeout bounds how long we wait for Hetzner actions to complete.
 	// Server creation with attached volumes can exceed a minute on a busy API.
 	actionTimeout = 5 * time.Minute
+
+	// serverCreateAttempts is how often a server is created when attaching its volume fails
+	serverCreateAttempts = 2
+	// serverDeleteAttempts is how often a server is deleted when the delete action fails
+	serverDeleteAttempts = 2
+	// apiRequestTimeout bounds a single HTTP request to the Hetzner API (not action waits)
+	apiRequestTimeout = 30 * time.Second
+
 	// provisionTimeout bounds how long we wait for cloud-init (incl. the Docker
 	// install) to finish on a new server.
 	provisionTimeout = 10 * time.Minute

@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -72,7 +73,12 @@ func (h *Hetzner) pollInterval() time.Duration {
 
 func NewHetzner(token string) *Hetzner {
 	return &Hetzner{
-		client: hcloud.NewClient(hcloud.WithToken(token)),
+		client: hcloud.NewClient(
+			hcloud.WithToken(token),
+			// The default client has no timeout, so a hung connection would block forever.
+			// A timeout is retried by the client like any other transient network error.
+			hcloud.WithHTTPClient(&http.Client{Timeout: apiRequestTimeout}),
+		),
 	}
 }
 
@@ -242,6 +248,10 @@ func (h *Hetzner) Create(
 			Labels:    req.Labels,
 		})
 		if err != nil {
+			// The volume may exist although the response got lost (e.g. a request
+			// timeout), and the name was free when we started, so it is ours
+			createdVolume, _ = h.volumeByName(context.WithoutCancel(ctx), req.Name)
+
 			return err
 		}
 
@@ -275,12 +285,64 @@ func (h *Hetzner) Create(
 
 	// Create the server
 	log.Default.Info("Creating a new server")
+
+	if err := h.createServerWithRetry(ctx, req, &createdServer); err != nil {
+		return err
+	}
+
+	log.Default.Info("Server created - provisioning")
+
+	return waitForProvisioned(ctx, createdServer, privateKeyFile, false)
+}
+
+// createServerWithRetry creates the server, once more if attaching its volume fails.
+func (h *Hetzner) createServerWithRetry(ctx context.Context, req *hcloud.ServerCreateOpts, created **hcloud.Server) error {
+	for attempt := 1; ; attempt++ {
+		err := h.createServer(ctx, req, created)
+		if err == nil {
+			return nil
+		}
+		// Hetzner sometimes fails attaching the volume with an unknown_error. The
+		// volume is fine, so retry with a fresh server before giving up.
+		if attempt >= serverCreateAttempts || !isVolumeAttachFailure(err) {
+			return err
+		}
+
+		log.Default.Warnf("Attaching the volume failed (%v), retrying with a new server", err)
+
+		if delErr := h.deleteServer(ctx, *created); delErr != nil {
+			// *created stays set so the caller's rollback tries again
+			return fmt.Errorf("%w (deleting the failed server %s also failed: %v)", err, (*created).Name, delErr)
+		}
+
+		*created = nil
+
+		// The volume can stay attached to the deleted server for a moment, which
+		// would make the next create fail on a volume that is still in use
+		if _, err := h.waitForVolumeDetached(ctx, req.Name); err != nil {
+			return err
+		}
+	}
+}
+
+// createServer creates a server and waits for the creation actions (including attaching
+// the volumes) to finish. The server is stored in created as soon as the API returns it,
+// even when an error follows, so the caller can remove it.
+func (h *Hetzner) createServer(ctx context.Context, req *hcloud.ServerCreateOpts, created **hcloud.Server) error {
 	server, _, err := h.client.Server.Create(ctx, *req)
 	if server.Server != nil {
 		// Track it even when err is set: the API may have created it before failing
-		createdServer = server.Server
+		*created = server.Server
 	}
 	if err != nil {
+		if server.Server == nil {
+			// The server may exist although the response got lost (e.g. a request
+			// timeout). The name was free when Create started, so it is ours.
+			if existing, lookupErr := h.GetByName(context.WithoutCancel(ctx), req.Name); lookupErr == nil && existing != nil {
+				*created = existing
+			}
+		}
+
 		return err
 	}
 
@@ -291,9 +353,17 @@ func (h *Hetzner) Create(
 		return err
 	}
 
-	log.Default.Info("Server created - provisioning")
+	return nil
+}
 
-	return waitForProvisioned(ctx, server.Server, privateKeyFile, false)
+// isVolumeAttachFailure reports whether err is a failed volume attach action.
+func isVolumeAttachFailure(err error) bool {
+	var actionErr hcloud.ActionError
+	if !errors.As(err, &actionErr) || actionErr.Action() == nil {
+		return false
+	}
+
+	return actionErr.Action().Command == "attach_volume"
 }
 
 // startExisting brings an already existing server to the provisioned state.
@@ -631,8 +701,29 @@ func (h *Hetzner) stop(ctx context.Context, name string, prepare func(context.Co
 	return h.deleteServer(ctx, server)
 }
 
-// deleteServer deletes the server and waits for the deletion to complete.
+// deleteServer deletes the server and waits for the deletion to complete. Hetzner
+// sometimes fails the delete action itself, so it is tried once more: a server that
+// stays behind keeps being billed. A server that is already gone counts as deleted.
 func (h *Hetzner) deleteServer(ctx context.Context, server *hcloud.Server) error {
+	var err error
+	for attempt := 1; attempt <= serverDeleteAttempts; attempt++ {
+		err = h.deleteServerOnce(ctx, server)
+
+		var actionErr hcloud.ActionError
+		// Not found on a retry means the failed delete went through after all
+		if err == nil || (attempt > 1 && hcloud.IsError(err, hcloud.ErrorCodeNotFound)) {
+			return nil
+		} else if !errors.As(err, &actionErr) {
+			return err
+		}
+
+		log.Default.Warnf("Deleting server %s failed (attempt %d of %d): %v", server.Name, attempt, serverDeleteAttempts, err)
+	}
+
+	return err
+}
+
+func (h *Hetzner) deleteServerOnce(ctx context.Context, server *hcloud.Server) error {
 	result, _, err := h.client.Server.DeleteWithResult(ctx, server)
 	if err != nil {
 		return err
