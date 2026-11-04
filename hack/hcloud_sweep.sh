@@ -15,7 +15,9 @@
 
 # Deletes e2e resources (label machineId=test-*) older than MAX_AGE_MINUTES (default 60).
 # These are runs whose own cleanup never ran, e.g. a cancelled workflow. Only
-# resources labelled machineId=test-... are touched.
+# resources labelled machineId=test-... are touched, plus orphaned primary IPs:
+# the ones Hetzner auto-creates for a server are named primary_ip-<id>, carry no
+# labels and have auto_delete set, and can outlive an interrupted run.
 
 set -uo pipefail
 
@@ -41,6 +43,24 @@ for id in $(stale volume); do
   echo "Deleting stale volume ${id}"
   hcloud volume detach "${id}" || true
   hcloud volume delete "${id}" || status=1
+done
+
+# Primary IPs outlive a server whose create was interrupted. Only unassigned
+# ones are touched: those labelled machineId=test-*, or auto-created ones
+# (auto_delete, generic primary_ip-<id> name). IPs created by hand have
+# auto_delete off by default and are left alone.
+stale_primary_ips() {
+  hcloud primary-ip list -o json | jq -r --argjson cutoff "${cutoff}" '
+    .[]
+    | select(.assignee_id == null)
+    | select(((.labels.machineId // "") | startswith("test-")) or (.auto_delete and (.name | test("^primary_ip-[0-9]+$"))))
+    | select((.created | sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | fromdateiso8601) < $cutoff)
+    | .id'
+}
+
+for id in $(stale_primary_ips); do
+  echo "Deleting stale primary IP ${id}"
+  hcloud primary-ip delete "${id}" || status=1
 done
 
 for id in $(stale ssh-key); do
