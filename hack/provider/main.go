@@ -274,9 +274,11 @@ fi`,
 			"DISK_SIZE": {
 				Description: "The volume size in GB. Raising it grows an existing volume (and its filesystem) the next time the server " +
 					"is created, i.e. on the next start after a stop; it never shrinks.",
-				Default: "40",
-				Local:   true,
-				Mutable: true,
+				Default:           "40",
+				ValidationPattern: options.PatternDiskSize,
+				ValidationMessage: "Use a whole number of GB, e.g. 40.",
+				Local:             true,
+				Mutable:           true,
 			},
 			options.EnvVolumeFormat: volumeFormatOption(),
 			"DISK_IMAGE": {

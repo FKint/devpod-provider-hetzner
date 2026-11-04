@@ -277,18 +277,27 @@ func (h *Hetzner) Create(
 		// Create the volume as it doesn't exist
 		log.Default.Info("Creating a new volume")
 
+		// Marks this attempt's volume, so a lookup after a lost response can tell it
+		// from one a concurrent run created under the same name
+		attempt := rand.Text()
+		labels := maps.Clone(req.Labels)
+		labels[labelCreateAttempt] = attempt
+
 		result, _, err := h.client.Volume.Create(ctx, hcloud.VolumeCreateOpts{
 			Location:  req.Location,
 			Name:      req.Name,
 			Size:      diskSize,
 			Format:    new(machine.VolumeFormat),
 			Automount: new(false),
-			Labels:    req.Labels,
+			Labels:    labels,
 		})
 		if err != nil {
 			// The volume may exist although the response got lost (e.g. a request
-			// timeout), and the name was free when we started, so it is ours
-			createdVolume, _ = h.volumeByName(context.WithoutCancel(ctx), req.Name)
+			// timeout). It is ours only if it carries this attempt's label.
+			if existing, lookupErr := h.volumeByName(context.WithoutCancel(ctx), req.Name); lookupErr == nil &&
+				existing != nil && existing.Labels[labelCreateAttempt] == attempt {
+				createdVolume = existing
+			}
 
 			return err
 		}
@@ -941,11 +950,13 @@ func attemptConnection(ctx context.Context, ip string, privateKeyFile []byte) (*
 		log.Default.Debugf("Server not reachable yet: %v", err)
 		return nil, err
 	case err != nil:
-		log.Default.Warnf("Unable to connect to server: %v", err)
 		// x/crypto/ssh has no typed error for a refused key, only this message
 		if strings.Contains(err.Error(), "unable to authenticate") {
+			log.Default.Warnf("Unable to connect to server: %v", err)
 			return nil, fmt.Errorf("%w: %w", errSSHAuth, err)
 		}
+		// Expected while sshd is starting (EOF, connection reset)
+		log.Default.Debugf("Unable to connect to server yet: %v", err)
 		return nil, err
 	}
 	defer func() {

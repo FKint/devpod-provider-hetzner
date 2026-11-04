@@ -38,6 +38,6 @@ var (
 		return fmt.Errorf("multiple volumes with name %s found", name)
 	}
 	ErrUnknownDiskImage = errors.New("unknown disk image")
-	ErrUnknownMachineID = errors.New("unknown machine id")
+	ErrUnknownMachineID = errors.New("unknown machine type")
 	ErrUnknownRegion    = errors.New("unknown region")
 )

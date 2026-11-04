@@ -132,3 +132,13 @@ func TestGenerateUserDataDropsTheKeyComment(t *testing.T) {
 	_, err = generateUserData("not a key", 1, defaultMachine(t))
 	assert.Error(t, err)
 }
+
+// A volume whose create answer got lost is ours, because it carries this attempt's label
+func TestCreateRemovesAVolumeWhoseResponseWasLost(t *testing.T) {
+	cloud := newFakeCloud()
+	cloud.loseResponse(reqCreateVolume)
+	_, key := newFakeSSHD(t)
+
+	assert.Error(t, createMachine(t, cloud, key, 10))
+	assertNothingLeft(t, cloud)
+}
