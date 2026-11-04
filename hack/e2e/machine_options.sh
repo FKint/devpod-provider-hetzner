@@ -14,7 +14,7 @@
 # limitations under the License.
 
 # The machine options passed to `provider create` reach the server. The e2e job
-# sets non-default values for them (SWAP_SIZE=2, CONTAINERS_SWAP_MAX=1G).
+# sets non-default values for them (SWAP_SIZE=2, CONTAINERS_SWAP_MAX=1G, CONTAINERS_TASKS_MAX=1234, SWAPPINESS=10).
 
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
@@ -26,3 +26,11 @@ swap="$(remote "swapon --noheadings --bytes --show=SIZE" | tr -d '[:space:]')"
 # CONTAINERS_SWAP_MAX=1G
 swap_max="$(remote "systemctl show devpod.slice -p MemorySwapMax --value" | tr -d '[:space:]')"
 [ "${swap_max}" = "1073741824" ] || fail "devpod.slice MemorySwapMax is ${swap_max}, expected 1073741824"
+
+# CONTAINERS_TASKS_MAX=1234
+tasks_max="$(remote "systemctl show devpod.slice -p TasksMax --value" | tr -d '[:space:]')"
+[ "${tasks_max}" = "1234" ] || fail "devpod.slice TasksMax is ${tasks_max}, expected 1234"
+
+# SWAPPINESS=10
+swappiness="$(remote "sysctl -n vm.swappiness" | tr -d '[:space:]')"
+[ "${swappiness}" = "10" ] || fail "vm.swappiness is ${swappiness}, expected 10"
