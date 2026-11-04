@@ -57,10 +57,8 @@ const (
 	// shutdownTimeout bounds the wait for a graceful shutdown. It has to cover
 	// systemd's grace period for stopping container processes.
 	shutdownTimeout = 2 * time.Minute
-	// localStopTimeout bounds stopping containers on the machine itself.
+	// localStopTimeout bounds stopping containers and syncing on the machine itself.
 	localStopTimeout = 90 * time.Second
-	// localSyncTimeout bounds flushing the disks on the machine itself.
-	localSyncTimeout = 30 * time.Second
 	// containerStopGrace is the seconds each container gets to exit before it is killed.
 	containerStopGrace = 30
 	// volumeDetachTimeout bounds how long Create waits for the volume of a deleted
