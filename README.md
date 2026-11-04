@@ -105,14 +105,17 @@ workspace with `devpod up <workspace> --provider-option KEY=VALUE`.
 | `CONTAINERS_CPU_QUOTA` | empty | Hard CPU cap for all containers together, as a percentage of one CPU (`350%` = 3.5 CPUs). Empty means no cap. Lowering the containers' CPU priority was measured to make no difference, so there is no weight option. |
 | `SWAPPINESS` | empty | Kernel `vm.swappiness` (0-200). Empty keeps the default (60). Don't lower it: re-reading an evicted file from the volume costs about 5x more than swapping a page back in from the local disk. |
 
-`SWAP_SIZE` plus 4 GB must fit on the server type's local disk, otherwise creating the server fails
-early. Swap lives on the local disk and is lost on every stop. A tmpfs `/tmp` is charged to the
-container's memory limit, so it can't outgrow `CONTAINERS_MEMORY_MAX` plus `CONTAINERS_SWAP_MAX`.
-After the server is provisioned the provider warns if the volume is more than 85% full.
+`SWAP_SIZE` plus 4 GB must fit on the server type's local disk, otherwise
+creating the server fails early. Swap lives on the local disk and is lost on
+every stop. A tmpfs `/tmp` is charged to the container's memory limit, so it
+can't outgrow `CONTAINERS_MEMORY_MAX` plus `CONTAINERS_SWAP_MAX`. After the
+server is provisioned the provider warns if the volume is more than 85% full.
 
-Limitations: there are no per-container disk quotas (`--storage-opt size=` needs the overlay2
-driver on XFS with `pquota`, not the containerd image store), no I/O weights and no network shaping.
-`hostRequirements` in `devcontainer.json` is not enforced by DevPod, so pick `MACHINE_TYPE` to match.
+Limitations: there are no per-container disk quotas (`--storage-opt size=`
+needs the overlay2 driver on XFS with `pquota`, not the containerd image
+store), no I/O weights and no network shaping. `hostRequirements` in
+`devcontainer.json` is not enforced by DevPod, so pick `MACHINE_TYPE` to
+match.
 
 #### Per-workspace settings
 
