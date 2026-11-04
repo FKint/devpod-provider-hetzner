@@ -44,6 +44,10 @@ func createOrStartServer(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	machine, err := options.MachineFromEnv()
+	if err != nil {
+		return err
+	}
 
 	ctx := context.Background()
 	h := hetzner.NewHetzner(opts.Token)
@@ -56,7 +60,7 @@ func createOrStartServer(cmd *cobra.Command, args []string) error {
 		return errors.New("no public key generated")
 	}
 
-	return h.Create(ctx, req, diskSize, *publicKey, privateKey)
+	return h.Create(ctx, req, diskSize, &machine, *publicKey, privateKey)
 }
 
 func init() {

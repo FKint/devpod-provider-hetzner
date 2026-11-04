@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/FKint/devpod-provider-hetzner/pkg/options"
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 	"github.com/loft-sh/devpod/pkg/provider"
 	"github.com/loft-sh/devpod/pkg/types"
@@ -45,6 +46,26 @@ const (
 	// against the Hetzner API and generates nothing (no dist/ needed).
 	checkOnlyArg = "check"
 )
+
+const optionTrue = "true"
+
+var boolEnum = types.OptionEnumArray{{Value: optionTrue}, {Value: "false"}}
+
+const memoryMessage = "Use a percentage of RAM (e.g. 90%), a size (e.g. 7G) or infinity."
+
+// machineOption declares an option that configures the server itself: it is
+// resolved when the machine is created and can be changed afterwards.
+func machineOption(description, def string, enum types.OptionEnumArray, pattern, message string) *types.Option {
+	return &types.Option{
+		Description:       description,
+		Default:           def,
+		Enum:              enum,
+		ValidationPattern: pattern,
+		ValidationMessage: message,
+		Local:             true,
+		Mutable:           true,
+	}
+}
 
 type platform struct{ os, arch string }
 
@@ -197,6 +218,11 @@ func BuildConfig(
 				},
 			},
 			{
+				Name:           "Docker options",
+				DefaultVisible: false,
+				Options:        options.MachineEnvs,
+			},
+			{
 				Name:           "Agent options",
 				DefaultVisible: false,
 				Options: []string{
@@ -242,17 +268,54 @@ fi`,
 				Enum:        machineTypes,
 				Local:       true,
 			},
+			// Machine options apply each time the server is created, i.e. on
+			// the next start after a stop.
+			options.EnvPersistDocker: machineOption(
+				"Keep Docker's images, containers, named volumes and build cache on the volume, so they survive a stop. "+
+					"If false, they live on the server's local disk and are lost on every stop.",
+				options.DefaultPersistDocker, boolEnum, "", ""),
+			options.EnvContainerdImageStore: machineOption(
+				"Use Docker's containerd image store (the default for new Docker Engine 29+ installs). "+
+					"Switching it on an existing machine hides the images and containers of the other store until switched back; "+
+					"they are rebuilt on the next start.",
+				options.DefaultContainerdImageStore, boolEnum, "", ""),
+			options.EnvBuildCacheSize: machineOption(
+				"Size of the Docker build cache kept by garbage collection, e.g. 5GB.",
+				options.DefaultBuildCacheSize, nil, options.PatternDockerSize, "Use a size such as 5GB or 500MB."),
+			options.EnvPruneImagesAfter: machineOption(
+				"At every start, remove images not used by any container that are older than this (e.g. 168h). "+
+					"\"never\" keeps them.",
+				options.DefaultPruneImagesAfter, nil, options.PatternPruneAge, "Use a duration such as 168h, or never."),
+			options.EnvPruneAnonymousVolumes: machineOption(
+				"At every start, remove anonymous volumes not used by any container. Named volumes are never removed.",
+				options.DefaultPruneAnonymousVolumes, boolEnum, "", ""),
+			options.EnvSwapSize: machineOption(
+				"Swap file size in GB on the server's local disk. 0 disables swap.",
+				options.DefaultSwapSize, nil, options.PatternWholeNumber, "Use whole GB, e.g. 8, or 0 for no swap."),
+			options.EnvContainersMemoryHigh: machineOption(
+				"Memory above which all containers together are throttled and pushed to swap: "+
+					"a percentage of RAM (85%), a size (6G) or infinity (no throttling, the default: a throttled "+
+					"runaway container can hang for minutes instead of being killed).",
+				options.DefaultContainersMemoryHigh, nil, options.PatternSystemdMemory, memoryMessage),
+			options.EnvContainersMemoryMax: machineOption(
+				"Hard memory limit for all containers together; above it the OOM killer stops a container process. "+
+					"A percentage of RAM (90%), a size (7G) or infinity.",
+				options.DefaultContainersMemoryMax, nil, options.PatternSystemdMemory, memoryMessage),
+			options.EnvContainersSwapMax: machineOption(
+				"Swap all containers together may use, so some stays for the host and a runaway container "+
+					"reaches the memory limit (and is killed) sooner. A size (4G) or infinity.",
+				options.DefaultContainersSwapMax, nil, options.PatternSystemdSize, "Use a size such as 4G, or infinity."),
 			"INACTIVITY_TIMEOUT": {
 				Description: "If defined, will automatically stop the VM after the inactivity period.",
 				Default:     "10m",
 			},
 			"INJECT_GIT_CREDENTIALS": {
 				Description: "If DevPod should inject git credentials into the remote host.",
-				Default:     "true",
+				Default:     optionTrue,
 			},
 			"INJECT_DOCKER_CREDENTIALS": {
 				Description: "If DevPod should inject docker credentials into the remote host.",
-				Default:     "true",
+				Default:     optionTrue,
 			},
 			"AGENT_PATH": {
 				Description: "The path where to inject the DevPod agent to.",
