@@ -36,6 +36,10 @@ import (
 const (
 	archAMD64 = "amd64"
 	archARM64 = "arm64"
+
+	// defaultMachineType must be offered by Hetzner when the provider.yaml is
+	// generated; Hetzner retires server types over time (cx32 became cx33).
+	defaultMachineType = "cx33"
 )
 
 type platform struct{ os, arch string }
@@ -107,6 +111,12 @@ func main() {
 		})
 	}
 
+	// A default Hetzner no longer offers would make every default "devpod up" fail,
+	// so refuse to generate a provider.yaml with one
+	if err := checkMachineTypeOffered(defaultMachineType, machineTypes); err != nil {
+		panic(err)
+	}
+
 	checksums := map[string]string{}
 	for _, p := range platforms {
 		checksum, err := File(filepath.Join("dist", p.binaryName()))
@@ -124,7 +134,7 @@ func main() {
 		checksums,
 		"nbg1",
 		regions,
-		"cx32",
+		defaultMachineType,
 		machineTypes,
 	))
 	if err != nil {
@@ -140,7 +150,7 @@ func BuildConfig(
 	checksums map[string]string,
 	defaultRegion string,
 	regions types.OptionEnumArray,
-	defaultMachineType string,
+	defaultType string,
 	machineTypes types.OptionEnumArray,
 ) provider.ProviderConfig {
 	releaseURLBase := fmt.Sprintf("https://github.com/FKint/devpod-provider-hetzner/releases/download/%s", version)
@@ -219,7 +229,7 @@ fi`,
 			},
 			"MACHINE_TYPE": {
 				Description: "The machine type to use.",
-				Default:     defaultMachineType,
+				Default:     defaultType,
 				Enum:        machineTypes,
 				Local:       true,
 			},
@@ -266,6 +276,18 @@ fi`,
 			Status:  types.StrArray{"${HETZNER_PROVIDER} status"},
 		},
 	}
+}
+
+// checkMachineTypeOffered fails if the default machine type isn't one of the offered ones.
+func checkMachineTypeOffered(def string, offered types.OptionEnumArray) error {
+	for _, o := range offered {
+		if o.Value == def {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("default MACHINE_TYPE %q is not offered by Hetzner, or is deprecated (%d offered); update defaultMachineType",
+		def, len(offered))
 }
 
 // File hashes a given file to a sha256 string
