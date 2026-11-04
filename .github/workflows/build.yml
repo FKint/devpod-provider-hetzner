@@ -129,6 +129,12 @@ jobs:
 
       - run: go build -o provider .
 
+      # Fails when the default MACHINE_TYPE or REGION is no longer offered by
+      # Hetzner, so a retired default is caught on the PR rather than at release.
+      # Creates no resources.
+      - name: Default machine type is still offered
+        run: go run ./hack/provider development > /dev/null
+
       - name: Create command
         run: ./provider create
 
