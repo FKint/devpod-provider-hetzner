@@ -89,7 +89,8 @@ jobs:
     env:
       HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
       DISK_IMAGE: docker-ce
-      DISK_SIZE: "30"
+      # 10 GB is the smallest volume. It is enlarged to 11 GB on the start (see below)
+      DISK_SIZE: "10"
       MACHINE_ID: test-${{ github.run_id }}
       MACHINE_FOLDER: ${{ github.workspace }}/.ssh
       # The e2e tests deliberately use cpx22, which is not the provider default (cx33).
@@ -147,6 +148,9 @@ jobs:
       - name: Create Docker state on the volume
         run: ./hack/e2e/persistence.sh before
 
+      - name: New volume is XFS
+        run: ./hack/e2e/volume_size.sh before 10
+
       - name: Stop command
         run: ./provider stop
 
@@ -154,7 +158,13 @@ jobs:
         run: ./hack/e2e/assert_status.sh Stopped
 
       - name: Start command
+        env:
+          # Raised since the create: the volume is enlarged and the filesystem grown
+          DISK_SIZE: "11"
         run: ./provider start
+
+      - name: Volume and filesystem grew
+        run: ./hack/e2e/volume_size.sh after 11
 
       - name: Status is Running again
         run: ./hack/e2e/assert_status.sh Running
