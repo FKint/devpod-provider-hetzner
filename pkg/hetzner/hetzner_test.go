@@ -250,7 +250,8 @@ func TestCheckSwapFits(t *testing.T) {
 	m := defaultMachine(t) // 8 GB swap
 	assert.NoError(t, checkSwapFits(&hcloud.ServerType{Name: "cx33", Disk: 80}, m))
 	assert.NoError(t, checkSwapFits(&hcloud.ServerType{Name: "cx23", Disk: 40}, m))
-	assert.NoError(t, checkSwapFits(&hcloud.ServerType{Name: "x", Disk: 12}, m), "exactly fits with the reserve")
+	assert.NoError(t, checkSwapFits(&hcloud.ServerType{Name: "x", Disk: 13}, m), "fits with the reserve")
+	assert.ErrorIs(t, checkSwapFits(&hcloud.ServerType{Name: "x", Disk: 12}, m), ErrSwapTooLarge, "8 GiB is more than 8 GB")
 	assert.ErrorIs(t, checkSwapFits(&hcloud.ServerType{Name: "tiny", Disk: 10}, m), ErrSwapTooLarge)
 
 	m.SwapSizeBytes = 0
@@ -259,14 +260,17 @@ func TestCheckSwapFits(t *testing.T) {
 }
 
 func TestDiskUsageWarnings(t *testing.T) {
-	assert.Empty(t, diskUsageWarnings("40%\n1%\n"))
-	assert.Empty(t, diskUsageWarnings("84%\n-\n"), "xfs reports no inode usage")
+	assert.Empty(t, diskUsageWarnings("space 40%\ninodes 1%\n"))
+	assert.Empty(t, diskUsageWarnings("space 84%\ninodes -\n"), "xfs reports no inode usage")
 	assert.Empty(t, diskUsageWarnings(""))
-	if w := diskUsageWarnings("91%\n3%\n"); assert.Len(t, w, 1) {
+	if w := diskUsageWarnings("inodes 90%\n"); assert.Len(t, w, 1) {
+		assert.Contains(t, w[0], "(inodes)")
+	}
+	if w := diskUsageWarnings("space 91%\ninodes 3%\n"); assert.Len(t, w, 1) {
 		assert.Contains(t, w[0], "91% full (space)")
 		assert.Contains(t, w[0], "DISK_SIZE")
 	}
-	assert.Len(t, diskUsageWarnings("85%\n99%\n"), 2)
+	assert.Len(t, diskUsageWarnings("space 85%\ninodes 99%\n"), 2)
 }
 
 func TestGenerateUserDataDockerOnVolume(t *testing.T) {

@@ -19,8 +19,8 @@
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 
-# cpx22 has an 80 GB disk; 100 GB of swap can never fit
-out="$(SWAP_SIZE=100 "${PROVIDER}" create 2>&1)" && fail "create succeeded with SWAP_SIZE=100"
+# The largest accepted swap (256 GB) is more than the e2e server type's local disk
+out="$(SWAP_SIZE=256 "${PROVIDER}" create 2>&1)" && fail "create succeeded with SWAP_SIZE=256"
 echo "${out}"
 echo "${out}" | grep -i -- "swap" || fail "the error does not mention the swap size"
 
