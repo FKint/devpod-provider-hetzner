@@ -91,8 +91,9 @@ func (h *Hetzner) waitForVolumeDetached(ctx context.Context, name string) (*hclo
 }
 
 // isTransient reports whether an API error is worth retrying: network trouble,
-// rate limiting or a server-side hiccup. Anything else (bad token, duplicate
-// volume name, ...) will not fix itself.
+// rate limiting, a server-side hiccup or a resource that is locked by another
+// action (conflict). Anything else (bad token, duplicate name, ...) will not fix
+// itself.
 func isTransient(err error) bool {
 	var netErr net.Error
 	if errors.As(err, &netErr) {

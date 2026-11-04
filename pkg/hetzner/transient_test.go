@@ -34,7 +34,9 @@ func TestIsTransient(t *testing.T) {
 	assert.True(t, isTransient(apiErr(hcloud.ErrorCodeRateLimitExceeded)))
 	assert.True(t, isTransient(apiErr(hcloud.ErrorCodeTimeout)))
 	assert.True(t, isTransient(apiErr(hcloud.ErrorCodeServerError)))
+	assert.True(t, isTransient(apiErr(hcloud.ErrorCodeConflict)), "a locked resource is released by the action holding it")
 	assert.False(t, isTransient(apiErr(hcloud.ErrorCodeUnauthorized)))
+	assert.False(t, isTransient(apiErr(hcloud.ErrorCodeUniquenessError)), "a duplicate name stays a duplicate")
 	assert.False(t, isTransient(errors.New("boom")))
 	assert.False(t, isTransient(nil))
 }

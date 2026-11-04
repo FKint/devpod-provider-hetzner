@@ -84,6 +84,12 @@ func TestMachineFromEnvOverrides(t *testing.T) {
 	}, m)
 }
 
+// Zero is refused wherever a limit is a percentage or a size
+const (
+	zeroPercent = "0%"
+	zeroSize    = "0G"
+)
+
 func TestMachineFromEnvInvalid(t *testing.T) {
 	for env, values := range map[string][]string{
 		EnvPersistDocker:         {"yes please"},
@@ -92,13 +98,13 @@ func TestMachineFromEnvInvalid(t *testing.T) {
 		EnvPruneImagesAfter:      {"7d", "0", "0h", "0s", "0.0m", "-1h", "1h || true", "+168h", "1h30m5ms", "1\u00b5s"},
 		EnvPruneAnonymousVolumes: {"2"},
 		EnvSwapSize:              {"-1", "8G", "1000"},
-		EnvContainersMemoryHigh:  {"85", "101%", "6GB", "6G\nMemoryMax=1", "0%", "0G", "85.555%"},
+		EnvContainersMemoryHigh:  {"85", "101%", "6GB", "6G\nMemoryMax=1", zeroPercent, zeroSize, "85.555%"},
 		EnvContainersMemoryMax:   {"lots"},
 		// A percentage is not scaled by RAM for swap, so only sizes are accepted
-		EnvContainersSwapMax:  {"half", "50%", "0G"},
+		EnvContainersSwapMax:  {"half", "50%", zeroSize},
 		EnvVolumeFormat:       {"btrfs", "XFS", "xfs;"},
 		EnvContainersTasksMax: {"0", "-1", "lots", "99999999999", "1 || true"},
-		EnvContainersCPUQuota: {"0%", "350", "3.5", "1%\nMemoryMax=1"},
+		EnvContainersCPUQuota: {zeroPercent, "350", "3.5", "1%\nMemoryMax=1"},
 		EnvSwappiness:         {"201", "-1", "60%", "1000", "high"},
 	} {
 		for _, v := range values {
@@ -116,18 +122,22 @@ func TestMachineFromEnvInvalid(t *testing.T) {
 // with MachineFromEnv on typical values.
 func TestMachinePatterns(t *testing.T) {
 	for pattern, values := range map[string]map[string]bool{
-		PatternDockerSize:   {DefaultBuildCacheSize: true, "500mb": true, "5": false, "5 GB": false},
-		PatternPruneAge:     {DefaultPruneImagesAfter: true, "never": true, "1h30m": true, "7d": false, "": false},
+		PatternDockerSize: {DefaultBuildCacheSize: true, "500mb": true, "5": false, "5 GB": false},
+		PatternPruneAge: {
+			DefaultPruneImagesAfter: true, "never": true, "1h30m": true, "0h30m": true, "1h0m": true, "0.5s": true,
+			"7d": false, "": false, "0h": false, "0s": false, "0.0m": false, "0h0m": false, "00s": false,
+		},
 		PatternWholeNumber:  {DefaultSwapSize: true, "0": true, "8G": false, "-1": false},
 		PatternVolumeFormat: {"xfs": true, "ext4": true, "btrfs": false, "xfs ext4": false},
 		PatternSystemdMemory: {
 			DefaultContainersMemoryHigh: true, DefaultContainersMemoryMax: true, "6G": true, "85.25%": true,
-			"85": false, "85.255%": false,
+			"85": false, "85.255%": false, "100%": true, "100.00%": true, "0.01%": true, "5%": true, "1G": true,
+			zeroPercent: false, "00%": false, "0.00%": false, "101%": false, "100.01%": false, zeroSize: false, "0": false,
 		},
 		PatternTasksMax:    {DefaultContainersTasksMax: true, infinity: true, "": false, "-1": false},
 		PatternCPUQuota:    {"": true, "350%": true, "350": false, "3.5%": false},
 		PatternSwappiness:  {"": true, "100": true, "1000": false, "-1": false},
-		PatternSystemdSize: {DefaultContainersSwapMax: true, infinity: true, "50%": false, "4": false},
+		PatternSystemdSize: {DefaultContainersSwapMax: true, infinity: true, "10G": true, "50%": false, "4": false, zeroSize: false},
 	} {
 		re := regexp.MustCompile(pattern)
 		for v, want := range values {

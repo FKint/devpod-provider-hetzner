@@ -167,17 +167,18 @@ func (h *Hetzner) BuildServerOptions(
 		return nil, "", nil, ErrUnknownMachineID
 	}
 
-	sshKey, err := h.upsertPublicKey(ctx, string(publicKey), opts.MachineID)
-	if err != nil {
-		return nil, "", nil, err
-	}
-
 	image, _, err := h.client.Image.GetByNameAndArchitecture(ctx, opts.DiskImage, serverType.Architecture)
 	if err != nil {
 		return nil, "", nil, err
 	}
 	if image == nil {
 		return nil, "", nil, ErrUnknownDiskImage
+	}
+
+	// Last, so that nothing that can still fail leaves the key behind in the project
+	sshKey, err := h.upsertPublicKey(ctx, string(publicKey), opts.MachineID)
+	if err != nil {
+		return nil, "", nil, err
 	}
 
 	return &hcloud.ServerCreateOpts{
@@ -229,6 +230,19 @@ func (h *Hetzner) Create(
 		return h.startExisting(ctx, existing, privateKeyFile)
 	}
 
+	// Remove anything created by this call if it doesn't succeed. A volume that
+	// already existed holds the user's data, so it is never removed here. The SSH
+	// key was uploaded before Create (and is re-uploaded on every create/start), so
+	// it goes on any failure from here on, however early.
+	var createdServer *hcloud.Server
+	var createdVolume *hcloud.Volume
+	defer func() {
+		if err != nil {
+			// The context may be what failed (e.g. Ctrl-C), so don't reuse it
+			h.rollback(context.WithoutCancel(ctx), req.Name, createdServer, createdVolume)
+		}
+	}()
+
 	// Refuse before waiting on anything
 	if err := checkSwapFits(req.ServerType, machine); err != nil {
 		return err
@@ -239,18 +253,6 @@ func (h *Hetzner) Create(
 	if err != nil {
 		return err
 	}
-
-	// Remove anything created by this call if it doesn't succeed. A volume that
-	// already existed holds the user's data, so it is never removed here. The SSH
-	// key is uploaded before Create, but is re-uploaded on every create/start.
-	var createdServer *hcloud.Server
-	var createdVolume *hcloud.Volume
-	defer func() {
-		if err != nil {
-			// The context may be what failed (e.g. Ctrl-C), so don't reuse it
-			h.rollback(context.WithoutCancel(ctx), req.Name, createdServer, createdVolume)
-		}
-	}()
 
 	if volume == nil {
 		// Only a new volume uses the size, so only then does the minimum apply
@@ -740,8 +742,9 @@ func (h *Hetzner) deleteServer(ctx context.Context, server *hcloud.Server) error
 		err = h.deleteServerOnce(ctx, server)
 
 		var actionErr hcloud.ActionError
-		// Not found on a retry means the failed delete went through after all
-		if err == nil || (attempt > 1 && hcloud.IsError(err, hcloud.ErrorCodeNotFound)) {
+		// Not found means the server is gone: deleted by a failed attempt that went
+		// through after all, or by something else in the meantime
+		if err == nil || hcloud.IsError(err, hcloud.ErrorCodeNotFound) {
 			return nil
 		} else if !errors.As(err, &actionErr) {
 			return err

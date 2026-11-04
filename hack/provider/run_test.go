@@ -19,14 +19,15 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/FKint/devpod-provider-hetzner/internal/fakehttp"
 	"github.com/loft-sh/devpod/pkg/provider"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -68,37 +69,26 @@ func TestRunValidatesItsInputBeforeCallingTheAPI(t *testing.T) {
 	assert.ErrorContains(t, err, "HCLOUD_TOKEN")
 }
 
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-
 // useFakeAPI answers the Hetzner API with canned lists. run builds its own client on
-// http.DefaultTransport, so replacing that keeps every request in-process. It is
-// global state: the tests using it must not run in parallel. serverTypes is the JSON
-// array of server types; an empty string makes every request fail with a 401.
+// http.DefaultTransport, so replacing that keeps every request in-process. serverTypes
+// is the JSON array of server types; an empty string makes every request fail with a 401.
 func useFakeAPI(t *testing.T, serverTypes string) {
 	t.Helper()
 
-	original := http.DefaultTransport
-	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		rec := httptest.NewRecorder()
-		rec.Header().Set("Content-Type", "application/json")
+	fakehttp.ReplaceDefaultTransport(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case serverTypes == "":
-			rec.WriteHeader(http.StatusUnauthorized)
-			_, _ = rec.WriteString(`{"error":{"code":"unauthorized","message":"denied"}}`) //nolint:misspell // the API's code
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = io.WriteString(w, `{"error":{"code":"unauthorized","message":"denied"}}`) //nolint:misspell // the API's code
 		case strings.HasSuffix(r.URL.Path, "/locations"):
-			_, _ = rec.WriteString(`{"locations":[{"id":1,"name":"nbg1","city":"Nuremberg"},{"id":2,"name":"fsn1","city":"Falkenstein"}]}`)
+			_, _ = io.WriteString(w, `{"locations":[{"id":1,"name":"nbg1","city":"Nuremberg"},{"id":2,"name":"fsn1","city":"Falkenstein"}]}`)
 		case strings.HasSuffix(r.URL.Path, "/server_types"):
-			_, _ = rec.WriteString(`{"server_types":` + serverTypes + `}`)
+			_, _ = io.WriteString(w, `{"server_types":`+serverTypes+`}`)
 		default:
-			rec.WriteHeader(http.StatusNotFound)
-			_, _ = rec.WriteString(`{"error":{"code":"not_found","message":"unexpected request"}}`)
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, `{"error":{"code":"not_found","message":"unexpected request"}}`)
 		}
-
-		return rec.Result(), nil
-	})
-	t.Cleanup(func() { http.DefaultTransport = original })
+	}))
 }
 
 const (
