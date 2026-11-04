@@ -67,6 +67,18 @@ func machineOption(description, def string, enum types.OptionEnumArray, pattern,
 	}
 }
 
+// volumeFormatOption is not mutable: an existing volume keeps its filesystem.
+func volumeFormatOption() *types.Option {
+	opt := machineOption(
+		"The filesystem of a newly created volume. An existing volume keeps its filesystem. "+
+			"xfs is faster than ext4 on Hetzner volumes and supports file clones (uv's clone mode).",
+		options.DefaultVolumeFormat, types.OptionEnumArray{{Value: "xfs"}, {Value: "ext4"}},
+		options.PatternVolumeFormat, "want xfs or ext4")
+	opt.Mutable = false
+
+	return opt
+}
+
 type platform struct{ os, arch string }
 
 // binaryName is the file name of the provider binary for this platform, as
@@ -213,6 +225,7 @@ func BuildConfig(
 				DefaultVisible: true,
 				Options: []string{
 					"DISK_SIZE",
+					options.EnvVolumeFormat,
 					"DISK_IMAGE",
 					"MACHINE_TYPE",
 				},
@@ -255,10 +268,13 @@ fi`,
 				Local:       true,
 			},
 			"DISK_SIZE": {
-				Description: "The disk size in GB.",
-				Default:     "30",
-				Local:       true,
+				Description: "The volume size in GB. Raising it grows an existing volume (and its filesystem) the next time the server " +
+					"is created, i.e. on the next start after a stop; it never shrinks.",
+				Default: "40",
+				Local:   true,
+				Mutable: true,
 			},
+			options.EnvVolumeFormat: volumeFormatOption(),
 			"DISK_IMAGE": {
 				Description: "The disk image to use.",
 				Default:     "docker-ce",

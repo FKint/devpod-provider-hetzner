@@ -198,8 +198,8 @@ func (h *Hetzner) Create(
 		return err
 	}
 	if existing != nil {
-		log.Default.Info("Server already exists: machine options (PERSIST_DOCKER, SWAP_SIZE, ...) and DISK_SIZE " +
-			"only apply when it is created, i.e. on the next start after a stop")
+		log.Default.Info("Server already exists: machine options (PERSIST_DOCKER, SWAP_SIZE, ...) and a larger DISK_SIZE " +
+			"only apply when the server is created, i.e. on the next start after a stop")
 		return h.startExisting(ctx, existing, privateKeyFile)
 	}
 
@@ -239,7 +239,7 @@ func (h *Hetzner) Create(
 			Location:  req.Location,
 			Name:      req.Name,
 			Size:      diskSize,
-			Format:    new("ext4"),
+			Format:    new(machine.VolumeFormat),
 			Automount: new(false),
 			Labels:    req.Labels,
 		})
@@ -256,6 +256,8 @@ func (h *Hetzner) Create(
 		}
 
 		log.Default.Info("Volume successfully created")
+	} else if err := h.growVolume(ctx, volume, diskSize); err != nil {
+		return err
 	}
 
 	// Generate the config init
@@ -738,15 +740,23 @@ func (h *Hetzner) deleteVolume(ctx context.Context, name string) error {
 	}
 
 	if volume.Server != nil {
-		// Detach volume
-		action, _, err := h.client.Volume.Detach(ctx, volume)
+		// A volume that points at a deleted server is being released and is locked
+		// meanwhile, so detaching it fails; only a live holder needs a detach.
+		live, err := h.attachedLiveServer(ctx, volume)
 		if err != nil {
-			return fmt.Errorf("detach volume: %w", err)
+			return err
 		}
 
-		if err := h.waitForActions(ctx, action); err != nil {
-			log.Default.Errorf("Error in volume detach action: %s, %s", action.Command, err)
-			return err
+		if live != nil {
+			action, _, err := h.client.Volume.Detach(ctx, volume)
+			if err != nil {
+				return fmt.Errorf("detach volume: %w", err)
+			}
+
+			if err := h.waitForActions(ctx, action); err != nil {
+				log.Default.Errorf("Error in volume detach action: %s, %s", action.Command, err)
+				return err
+			}
 		}
 	}
 

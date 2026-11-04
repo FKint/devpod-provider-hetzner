@@ -144,7 +144,7 @@ type renderedUserData struct {
 // defaultMachine returns the machine options as DevPod passes them by default.
 func defaultMachine(t *testing.T) *options.Machine {
 	t.Helper()
-	for _, env := range options.MachineEnvs {
+	for _, env := range append([]string{options.EnvVolumeFormat}, options.MachineEnvs...) {
 		t.Setenv(env, "")
 	}
 	m, err := options.MachineFromEnv()

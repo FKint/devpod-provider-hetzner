@@ -71,8 +71,7 @@ func (f *fakeStopAPI) handler() http.Handler {
 	mux.HandleFunc("/servers/5/actions/shutdown", func(w http.ResponseWriter, _ *http.Request) {
 		f.record(callShutdown)
 		if f.shutdownFails {
-			w.WriteHeader(http.StatusConflict)
-			_ = json.NewEncoder(w).Encode(map[string]any{keyError: map[string]any{"code": "locked", "message": "server locked"}})
+			writeAPIError(w, http.StatusConflict, "locked", "server locked")
 			return
 		}
 		_ = json.NewEncoder(w).Encode(action)
@@ -160,6 +159,12 @@ func TestStopFromMachineDeletesWhenLocalStepsFail(t *testing.T) {
 	h.runLocal = func(context.Context, string, ...string) error { return errors.New("docker is gone") }
 	assert.NoError(t, h.Stop(context.Background(), "machine", true))
 	assert.Equal(t, []string{callDelete}, api.called())
+}
+
+// writeAPIError answers like the Hetzner API does for a failed request.
+func writeAPIError(w http.ResponseWriter, status int, code, message string) {
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{keyError: map[string]any{"code": code, "message": message}})
 }
 
 // JSON keys shared by the fake API servers in the tests

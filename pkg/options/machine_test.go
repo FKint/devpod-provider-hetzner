@@ -28,6 +28,7 @@ const infinity = "infinity"
 var allMachineEnvs = []string{
 	EnvPersistDocker, EnvContainerdImageStore, EnvBuildCacheSize, EnvPruneImagesAfter,
 	EnvPruneAnonymousVolumes, EnvSwapSize, EnvContainersMemoryHigh, EnvContainersMemoryMax, EnvContainersSwapMax,
+	EnvVolumeFormat,
 	EnvContainersTasksMax, EnvContainersCPUQuota, EnvSwappiness,
 }
 
@@ -49,6 +50,7 @@ func TestMachineFromEnvDefaults(t *testing.T) {
 		BuildCacheSize:        "5GB",
 		PruneImagesAfter:      "168h",
 		PruneAnonymousVolumes: true,
+		VolumeFormat:          "xfs",
 		SwapSizeBytes:         8 << 30,
 		ContainersMemoryHigh:  infinity,
 		ContainersMemoryMax:   "90%",
@@ -68,11 +70,13 @@ func TestMachineFromEnvOverrides(t *testing.T) {
 	t.Setenv(EnvContainersMemoryHigh, "6G")
 	t.Setenv(EnvContainersMemoryMax, infinity)
 	t.Setenv(EnvContainersSwapMax, "2G")
+	t.Setenv(EnvVolumeFormat, "ext4")
 
 	m, err := MachineFromEnv()
 	assert.NoError(t, err)
 	assert.Equal(t, Machine{
 		BuildCacheSize:       "500MB",
+		VolumeFormat:         "ext4",
 		ContainersMemoryHigh: "6G",
 		ContainersMemoryMax:  infinity,
 		ContainersSwapMax:    "2G",
@@ -92,6 +96,7 @@ func TestMachineFromEnvInvalid(t *testing.T) {
 		EnvContainersMemoryMax:   {"lots"},
 		// A percentage is not scaled by RAM for swap, so only sizes are accepted
 		EnvContainersSwapMax:  {"half", "50%", "0G"},
+		EnvVolumeFormat:       {"btrfs", "XFS", "xfs;"},
 		EnvContainersTasksMax: {"0", "-1", "lots", "99999999999", "1 || true"},
 		EnvContainersCPUQuota: {"0%", "350", "3.5", "1%\nMemoryMax=1"},
 		EnvSwappiness:         {"201", "-1", "60%", "1000", "high"},
@@ -111,9 +116,10 @@ func TestMachineFromEnvInvalid(t *testing.T) {
 // with MachineFromEnv on typical values.
 func TestMachinePatterns(t *testing.T) {
 	for pattern, values := range map[string]map[string]bool{
-		PatternDockerSize:  {DefaultBuildCacheSize: true, "500mb": true, "5": false, "5 GB": false},
-		PatternPruneAge:    {DefaultPruneImagesAfter: true, "never": true, "1h30m": true, "7d": false, "": false},
-		PatternWholeNumber: {DefaultSwapSize: true, "0": true, "8G": false, "-1": false},
+		PatternDockerSize:   {DefaultBuildCacheSize: true, "500mb": true, "5": false, "5 GB": false},
+		PatternPruneAge:     {DefaultPruneImagesAfter: true, "never": true, "1h30m": true, "7d": false, "": false},
+		PatternWholeNumber:  {DefaultSwapSize: true, "0": true, "8G": false, "-1": false},
+		PatternVolumeFormat: {"xfs": true, "ext4": true, "btrfs": false, "xfs ext4": false},
 		PatternSystemdMemory: {
 			DefaultContainersMemoryHigh: true, DefaultContainersMemoryMax: true, "6G": true, "85.25%": true,
 			"85": false, "85.255%": false,

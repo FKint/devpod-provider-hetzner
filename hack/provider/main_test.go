@@ -51,7 +51,7 @@ func TestBuildConfigIsValidProvider(t *testing.T) {
 	for _, g := range parsed.OptionGroups {
 		grouped = append(grouped, g.Options...)
 	}
-	for _, name := range options.MachineEnvs {
+	for _, name := range append([]string{options.EnvVolumeFormat}, options.MachineEnvs...) {
 		opt, ok := parsed.Options[name]
 		if !assert.True(t, ok, name) {
 			continue

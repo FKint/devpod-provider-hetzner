@@ -5,7 +5,8 @@
 mounts:
   - - /dev/disk/by-id/scsi-0HC_Volume_{{ .VolumeID }}
     - /home/{{ .Username }}
-    - ext4
+    # xfs on new volumes, ext4 on volumes created by earlier versions
+    - auto
     # No online discard: it slows every delete on the network volume. Freed
     # blocks are trimmed once per boot instead (see runcmd).
     - noatime,nofail,defaults
@@ -47,6 +48,9 @@ runcmd:
   - mountpoint -q /home/{{ .Username }} || exit 1
   # Install Docker
   - if docker ; then echo "Docker already installed"; else curl -fsSL https://get.docker.com | sh; fi
+  # Grow the filesystem if the volume was enlarged (DISK_SIZE); a no-op otherwise.
+  # ext4 volumes also get their root-reserved blocks cut from 5% to 1%.
+  - "case $(findmnt -n -o FSTYPE /home/{{ .Username }}) in xfs) xfs_growfs /home/{{ .Username }};; ext4) d=$(findmnt -n -o SOURCE /home/{{ .Username }}); resize2fs $d; tune2fs -m 1 $d;; esac || echo 'devpod: could not grow the filesystem'"
   # containerd can start before its drop-in is written, so restart both,
   # containerd first
   - systemctl daemon-reload

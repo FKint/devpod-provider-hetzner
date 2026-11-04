@@ -38,12 +38,14 @@ const (
 	EnvContainersMemoryHigh  = "CONTAINERS_MEMORY_HIGH"
 	EnvContainersMemoryMax   = "CONTAINERS_MEMORY_MAX"
 	EnvContainersSwapMax     = "CONTAINERS_SWAP_MAX"
+	EnvVolumeFormat          = "VOLUME_FORMAT"
 	EnvContainersTasksMax    = "CONTAINERS_TASKS_MAX"
 	EnvContainersCPUQuota    = "CONTAINERS_CPU_QUOTA"
 	EnvSwappiness            = "SWAPPINESS"
 )
 
-// MachineEnvs lists every machine option, for grouping and for tests.
+// MachineEnvs lists the machine options of the "Docker options" group, for grouping
+// and for tests. EnvVolumeFormat is not in it: it is grouped with the Hetzner options.
 var MachineEnvs = []string{
 	EnvPersistDocker, EnvContainerdImageStore, EnvBuildCacheSize,
 	EnvPruneImagesAfter, EnvPruneAnonymousVolumes, EnvSwapSize,
@@ -75,6 +77,10 @@ const (
 	DefaultSwappiness         = ""
 )
 
+// DefaultVolumeFormat is the filesystem of newly created volumes: no inode limit and
+// reflink support (uv's clone mode); the numbers are in the README.
+const DefaultVolumeFormat = "xfs"
+
 // PruneNever disables the image prune at start.
 const PruneNever = "never"
 
@@ -94,6 +100,8 @@ const (
 	PatternSystemdSize = `^(\d+[KMGT]|infinity)$`
 	PatternPruneAge    = `^([Nn][Ee][Vv][Ee][Rr]|(\d+(\.\d+)?[hms])+)$`
 	PatternWholeNumber = `^\d+$`
+	// The filesystem of a new volume
+	PatternVolumeFormat = `^(xfs|ext4)$`
 	// A process limit, or infinity
 	PatternTasksMax = `^(\d+|infinity)$`
 	// Empty (no cap) or a percentage of one CPU: 350% is 3.5 CPUs
@@ -107,6 +115,7 @@ var (
 	systemdMemoryRe = regexp.MustCompile(PatternSystemdMemory)
 	systemdSizeRe   = regexp.MustCompile(PatternSystemdSize)
 	pruneAgeRe      = regexp.MustCompile(PatternPruneAge)
+	volumeFormatRe  = regexp.MustCompile(PatternVolumeFormat)
 	tasksMaxRe      = regexp.MustCompile(PatternTasksMax)
 	cpuQuotaRe      = regexp.MustCompile(PatternCPUQuota)
 	swappinessRe    = regexp.MustCompile(PatternSwappiness)
@@ -129,6 +138,9 @@ type Machine struct {
 	PruneImagesAfter string
 	// PruneAnonymousVolumes removes unused anonymous volumes at start.
 	PruneAnonymousVolumes bool
+	// VolumeFormat is the filesystem of a newly created volume ("xfs" or "ext4").
+	// An existing volume keeps its filesystem.
+	VolumeFormat string
 	// SwapSizeBytes is the swap file size on the local disk; 0 disables swap.
 	SwapSizeBytes int64
 	// ContainersMemoryHigh, ContainersMemoryMax and ContainersSwapMax cap all
@@ -274,6 +286,7 @@ func MachineFromEnv() (Machine, error) {
 		Swappiness:            p.swappiness(),
 	}
 	m.BuildCacheSize, _ = p.pattern(EnvBuildCacheSize, DefaultBuildCacheSize, dockerSizeRe, "want a size such as 5GB or 500MB")
+	m.VolumeFormat, _ = p.pattern(EnvVolumeFormat, DefaultVolumeFormat, volumeFormatRe, "want xfs or ext4")
 
 	if len(p.errs) > 0 {
 		return Machine{}, fmt.Errorf("invalid machine options: %s", strings.Join(p.errs, "; "))

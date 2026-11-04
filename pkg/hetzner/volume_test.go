@@ -48,6 +48,9 @@ type fakeAPI struct {
 
 	volumeCalls atomic.Int32
 	serverCalls atomic.Int32
+	// detachCalls and deleteCalls count the requests to detach and to delete the volume
+	detachCalls atomic.Int32
+	deleteCalls atomic.Int32
 }
 
 func (f *fakeAPI) handler() http.Handler {
@@ -70,11 +73,21 @@ func (f *fakeAPI) handler() http.Handler {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"volumes": vols})
 	})
+	// Detaching a volume that its deleted server is still releasing fails as locked
+	mux.HandleFunc("/volumes/7/actions/detach", func(w http.ResponseWriter, _ *http.Request) {
+		f.detachCalls.Add(1)
+		writeAPIError(w, http.StatusUnprocessableEntity, "locked", "resource is locked")
+	})
+	mux.HandleFunc("/volumes/7", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			f.deleteCalls.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		}
+	})
 	mux.HandleFunc("/servers/42", func(w http.ResponseWriter, _ *http.Request) {
 		f.serverCalls.Add(1)
 		if f.server42 == "" {
-			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(map[string]any{keyError: map[string]any{"code": "not_found", "message": "server not found"}})
+			writeAPIError(w, http.StatusNotFound, "not_found", "server not found")
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{keyServer: map[string]any{keyID: 42, keyName: "other", keyStatus: f.server42}})
@@ -194,4 +207,22 @@ func TestWaitForVolumeDetachedDoesNotRetryPermanentErrors(t *testing.T) {
 	_, err := api.hetzner(t).waitForVolumeDetached(context.Background(), "machine")
 	assert.Error(t, err)
 	assert.Equal(t, int32(1), api.volumeCalls.Load())
+}
+
+func TestDeleteVolumeWaitsForTheDeletedServerToReleaseIt(t *testing.T) {
+	// The server is gone, but the volume points at it for a couple of lookups: it
+	// is locked, so no detach is attempted and the volume is deleted once released.
+	api := &fakeAPI{attachedFor: 3}
+	assert.NoError(t, api.hetzner(t).deleteVolume(context.Background(), "machine"))
+	assert.Zero(t, api.detachCalls.Load())
+	assert.Equal(t, int32(1), api.deleteCalls.Load())
+}
+
+func TestDeleteVolumeDetachesFromLiveServer(t *testing.T) {
+	// A running server holds it: detaching is needed (the fake refuses, so it fails)
+	api := &fakeAPI{attachedFor: -1, server42: string(hcloud.ServerStatusRunning)}
+	err := api.hetzner(t).deleteVolume(context.Background(), "machine")
+	assert.ErrorContains(t, err, "detach volume")
+	assert.Equal(t, int32(1), api.detachCalls.Load())
+	assert.Zero(t, api.deleteCalls.Load())
 }
