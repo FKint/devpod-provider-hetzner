@@ -175,7 +175,7 @@ func (h *Hetzner) BuildServerOptions(
 		return nil, "", nil, err
 	}
 	if serverType == nil {
-		return nil, "", nil, ErrUnknownMachineID
+		return nil, "", nil, ErrUnknownMachineType
 	}
 
 	image, _, err := h.client.Image.GetByNameAndArchitecture(ctx, opts.DiskImage, serverType.Architecture)
@@ -281,6 +281,9 @@ func (h *Hetzner) Create(
 		// from one a concurrent run created under the same name
 		attempt := rand.Text()
 		labels := maps.Clone(req.Labels)
+		if labels == nil {
+			labels = map[string]string{}
+		}
 		labels[labelCreateAttempt] = attempt
 
 		result, _, err := h.client.Volume.Create(ctx, hcloud.VolumeCreateOpts{
@@ -294,8 +297,12 @@ func (h *Hetzner) Create(
 		if err != nil {
 			// The volume may exist although the response got lost (e.g. a request
 			// timeout). It is ours only if it carries this attempt's label.
-			if existing, lookupErr := h.volumeByName(context.WithoutCancel(ctx), req.Name); lookupErr == nil &&
-				existing != nil && existing.Labels[labelCreateAttempt] == attempt {
+			existing, lookupErr := h.volumeByName(context.WithoutCancel(ctx), req.Name)
+			switch {
+			case lookupErr != nil:
+				log.Default.Warnf("Could not check whether volume %s was created, remove it manually if it exists: %v",
+					req.Name, lookupErr)
+			case existing != nil && existing.Labels[labelCreateAttempt] == attempt:
 				createdVolume = existing
 			}
 
@@ -396,7 +403,11 @@ func (h *Hetzner) createServer(ctx context.Context, req *hcloud.ServerCreateOpts
 			// The server may exist although the response got lost (e.g. a request
 			// timeout). It is ours only if it carries this attempt's label.
 			existing, lookupErr := h.GetByName(context.WithoutCancel(ctx), req.Name)
-			if lookupErr == nil && existing != nil && existing.Labels[labelCreateAttempt] == attempt {
+			switch {
+			case lookupErr != nil:
+				log.Default.Warnf("Could not check whether server %s was created, remove it manually if it exists: %v",
+					req.Name, lookupErr)
+			case existing != nil && existing.Labels[labelCreateAttempt] == attempt:
 				*created = existing
 			}
 		}

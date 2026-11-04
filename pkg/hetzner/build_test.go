@@ -94,7 +94,7 @@ func TestBuildServerOptionsRejectsUnknownNames(t *testing.T) {
 		want    error
 	}{
 		{"region", func(o *options.Options) { o.Region = "mars1" }, "", ErrUnknownRegion},
-		{"machine type", func(o *options.Options) { o.MachineType = "cx999" }, "", ErrUnknownMachineID},
+		{"machine type", func(o *options.Options) { o.MachineType = "cx999" }, "", ErrUnknownMachineType},
 		{"disk image", func(o *options.Options) { o.DiskImage = "nope" }, "", ErrUnknownDiskImage},
 		{"region (API says none)", func(*options.Options) {}, "location", ErrUnknownRegion},
 	}

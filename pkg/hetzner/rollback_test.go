@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/FKint/devpod-provider-hetzner/pkg/options"
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -141,4 +142,16 @@ func TestCreateRemovesAVolumeWhoseResponseWasLost(t *testing.T) {
 
 	assert.Error(t, createMachine(t, cloud, key, 10))
 	assertNothingLeft(t, cloud)
+}
+
+// Create is exported: a request without labels must not panic
+func TestCreateAcceptsARequestWithoutLabels(t *testing.T) {
+	cloud := newFakeCloud()
+	cloud.loseResponse(reqCreateVolume)
+	req := testRequest()
+	req.Labels = nil
+
+	assert.NotPanics(t, func() {
+		assert.Error(t, cloud.hetzner(t).Create(context.Background(), req, 10, &options.Machine{}, testPublicKey, nil))
+	})
 }

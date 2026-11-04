@@ -103,8 +103,8 @@ const (
 	// "never", or a duration made of h, m and s parts. Only the shape is checked
 	// here: whether it is above zero and fits a time.Duration is up to ParseDuration.
 	PatternPruneAge = `^([Nn][Ee][Vv][Ee][Rr]|(\d+(\.\d+)?[hms])+)$`
-	// A positive whole number of GB
-	PatternDiskSize = `^\s*0*[1-9]\d*\s*$`
+	// A positive whole number of GB, at most five digits (Hetzner volumes top out at 10 TB)
+	PatternDiskSize = `^\s*0*[1-9]\d{0,4}\s*$`
 	// Whole GB from 0 to maxSwapSizeGB
 	PatternSwapSize = `^0*(\d{1,2}|1\d\d|2[0-4]\d|25[0-6])$`
 	// The filesystem of a new volume
