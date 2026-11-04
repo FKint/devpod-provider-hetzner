@@ -53,17 +53,16 @@ or to fix changes made by DevPod or Hetzner.
 
    ```shell
    devpod provider add FKint/devpod-provider-hetzner
-   devpod provider use hetzner -o TOKEN=<your-hcloud-token>
+   devpod provider use hetzner -o HCLOUD_TOKEN=<your-hcloud-token>
    ```
 
    This downloads the latest GitHub release. To pin a version use
    `FKint/devpod-provider-hetzner@v1.2.3`. In the DevPod desktop app, use
    Providers → Add → Custom and enter the same reference.
 
-   The DevPod provider option is called `TOKEN`. If you don't set it, DevPod
-   falls back to the `HETZNER_TOKEN` or `HETZNER_ACCESS_TOKEN` environment
-   variable. `HCLOUD_TOKEN` is only what the provider binary reads when you run
-   it directly (see [Development](#development)); it is not a DevPod option.
+   The token option is `HCLOUD_TOKEN`. If you don't set it, DevPod falls back
+   to the `HCLOUD_TOKEN`, `HETZNER_TOKEN` or `HETZNER_ACCESS_TOKEN` environment
+   variable. Earlier releases called it `TOKEN`; set it again after updating.
 
 1. Start a workspace:
 
@@ -73,7 +72,7 @@ or to fix changes made by DevPod or Hetzner.
 
 See the [DevPod documentation](https://devpod.sh/docs/managing-providers/add-provider)
 for more on managing providers. Region, server type and the other options are
-set the same way as `TOKEN`, with `devpod provider set-options hetzner -o KEY=VALUE`
+set the same way as the token, with `devpod provider set-options hetzner -o KEY=VALUE`
 (see [Machine options](#machine-options)).
 
 ### Updating
