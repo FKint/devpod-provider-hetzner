@@ -138,6 +138,10 @@ type fakeSSHD struct {
 	hang bool
 	// dfOutput is what the disk usage command prints
 	dfOutput string
+	// statusOutput replaces the cloud-init status report when set
+	statusOutput string
+	// statusExit is the exit status of the cloud-init status command
+	statusExit uint32
 
 	mu sync.Mutex
 	// statuses are the cloud-init states reported, one per check; the last repeats
@@ -258,10 +262,21 @@ func (d *fakeSSHD) session(ch cryptoSsh.Channel, reqs <-chan *cryptoSsh.Request)
 		}
 		_ = req.Reply(true, nil)
 		_, _ = ch.Write([]byte(d.output(payload.Command)))
-		_, _ = ch.SendRequest("exit-status", false, cryptoSsh.Marshal(struct{ Status uint32 }{0}))
+		_, _ = ch.SendRequest("exit-status", false, cryptoSsh.Marshal(struct{ Status uint32 }{d.exitStatus(payload.Command)}))
 
 		return
 	}
+}
+
+func (d *fakeSSHD) exitStatus(command string) uint32 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if strings.HasPrefix(command, "cloud-init status") {
+		return d.statusExit
+	}
+
+	return 0
 }
 
 func (d *fakeSSHD) output(command string) string {
@@ -271,6 +286,9 @@ func (d *fakeSSHD) output(command string) string {
 
 	switch {
 	case strings.HasPrefix(command, "cloud-init status"):
+		if d.statusOutput != "" {
+			return d.statusOutput
+		}
 		status := statusRunning
 		if len(d.statuses) > 0 {
 			status = d.statuses[0]
