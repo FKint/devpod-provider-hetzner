@@ -73,8 +73,7 @@ func (f *fakeAPI) handler() http.Handler {
 	mux.HandleFunc("/servers/42", func(w http.ResponseWriter, _ *http.Request) {
 		f.serverCalls.Add(1)
 		if f.server42 == "" {
-			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(map[string]any{keyError: map[string]any{"code": "not_found", "message": "server not found"}})
+			writeAPIError(w, http.StatusNotFound, "not_found", "server not found")
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{keyServer: map[string]any{keyID: 42, keyName: "other", keyStatus: f.server42}})

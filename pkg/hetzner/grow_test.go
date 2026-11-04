@@ -55,8 +55,7 @@ func (f *fakeResizeAPI) hetzner() *Hetzner {
 		}
 		f.calls.Add(1)
 		if f.fail {
-			rec.WriteHeader(http.StatusForbidden)
-			_ = json.NewEncoder(rec).Encode(map[string]any{"error": map[string]any{"code": "limit_reached", "message": "limit reached"}})
+			writeAPIError(rec, http.StatusForbidden, "limit_reached", "limit reached")
 			return rec.Result(), nil
 		}
 		var body struct {
