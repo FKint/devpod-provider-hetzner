@@ -280,6 +280,8 @@ func (d *fakeSSHD) output(command string) string {
 		}
 
 		return "status: " + status + "\n"
+	case strings.HasPrefix(command, "echo "):
+		return strings.TrimPrefix(command, "echo ") + "\n"
 	case strings.HasPrefix(command, "df "):
 		return d.dfOutput
 	}

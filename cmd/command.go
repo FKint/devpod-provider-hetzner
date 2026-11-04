@@ -25,7 +25,6 @@ import (
 	"github.com/FKint/devpod-provider-hetzner/pkg/hetzner"
 	"github.com/FKint/devpod-provider-hetzner/pkg/options"
 	"github.com/loft-sh/devpod/pkg/ssh"
-	"github.com/loft-sh/log"
 	"github.com/spf13/cobra"
 )
 
@@ -52,27 +51,8 @@ var commandCmd = &cobra.Command{
 			return fmt.Errorf("load private key: %w", err)
 		}
 
-		// Create SSH client
-		server, err := hetzner.NewHetzner(opts.Token).GetByName(ctx, opts.MachineID)
-		if err != nil {
-			return err
-		} else if server == nil {
-			return fmt.Errorf("vm not found")
-		}
-
-		// Call external address
-		sshClient, err := hetzner.DialSSH(ctx, server.PublicNet.IPv4.IP.String(), privateKey)
-		if err != nil {
-			return fmt.Errorf("create ssh client: %w", err)
-		}
-		defer func() {
-			if err := sshClient.Close(); err != nil {
-				log.Default.Debugf("Error closing SSH connection: %v", err)
-			}
-		}()
-
-		// Run command
-		return ssh.Run(ctx, sshClient, command, os.Stdin, os.Stdout, os.Stderr, nil)
+		return hetzner.NewHetzner(opts.Token).RunCommand(
+			ctx, opts.MachineID, privateKey, command, os.Stdin, os.Stdout, os.Stderr)
 	},
 }
 
