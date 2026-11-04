@@ -1,8 +1,14 @@
 header:
   license:
     spdx-id: Apache-2.0
-    copyright-owner: "Simon Emms <simon@simonemms.com>"
-    copyright-year: 2023
+    # Applied to new files only (`license-eye header fix`); existing headers are
+    # accepted as long as they match `pattern`.
+    copyright-owner: "github.com/FKint/devpod-provider-hetzner Authors"
+    copyright-year: 2026
+    pattern: |
+      Copyright 2023 Simon Emms <simon@simonemms.com>
+      (Copyright 2026 github.com/FKint/devpod-provider-hetzner Authors
+      )?
   paths-ignore:
     - "**/dist"
     - "**/tmp"
