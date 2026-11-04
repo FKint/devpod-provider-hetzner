@@ -41,6 +41,8 @@ type fakeAPI struct {
 	attachedFor int
 	// errorsFirst is how many volume lookups fail with a server error before they succeed
 	errorsFirst int
+	// errorsAfterFirst is how many lookups fail with a server error after the first one succeeded
+	errorsAfterFirst int
 	// duplicate makes the volume lookup return two volumes with the same name
 	duplicate bool
 	// server42 is what GET /servers/42 returns: "" = not found, otherwise its status
@@ -57,7 +59,7 @@ func (f *fakeAPI) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/volumes", func(w http.ResponseWriter, _ *http.Request) {
 		n := int(f.volumeCalls.Add(1))
-		if n <= f.errorsFirst {
+		if n <= f.errorsFirst || (n > 1 && n <= 1+f.errorsAfterFirst) {
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write([]byte(`{"error":{"code":"server_error","message":"boom"}}`))
 			return
@@ -225,4 +227,25 @@ func TestDeleteVolumeDetachesFromLiveServer(t *testing.T) {
 	assert.ErrorContains(t, err, "detach volume")
 	assert.Equal(t, int32(1), api.detachCalls.Load())
 	assert.Zero(t, api.deleteCalls.Load())
+}
+
+func TestDeleteVolumeRetriesTransientErrorsWhileWaiting(t *testing.T) {
+	// Two lookups fail while waiting for the release; the delete still goes through
+	api := &fakeAPI{attachedFor: 4, errorsAfterFirst: 2}
+	assert.NoError(t, api.hetzner(t).deleteVolume(context.Background(), "machine"))
+	assert.Equal(t, int32(1), api.deleteCalls.Load())
+}
+
+func TestDeleteVolumeGivesUpOnPersistentErrorsWhileWaiting(t *testing.T) {
+	api := &fakeAPI{attachedFor: -1, errorsAfterFirst: 100}
+	err := api.hetzner(t).deleteVolume(context.Background(), "machine")
+	assert.Error(t, err)
+	assert.Zero(t, api.deleteCalls.Load(), "a volume that may still be attached is not deleted")
+	assert.Equal(t, int32(detachCheckRetries+2), api.volumeCalls.Load())
+}
+
+func TestDeleteVolumeDeletesAFreeVolume(t *testing.T) {
+	api := &fakeAPI{}
+	assert.NoError(t, api.hetzner(t).deleteVolume(context.Background(), "machine"))
+	assert.Equal(t, int32(1), api.deleteCalls.Load())
 }
