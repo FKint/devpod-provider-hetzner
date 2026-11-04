@@ -101,6 +101,21 @@ workspace with `devpod up <workspace> --provider-option KEY=VALUE`.
 | `CONTAINERS_MEMORY_HIGH` | `infinity` | All containers together are throttled above this: a percentage of RAM, a size (`6G`) or `infinity`. Left off on purpose: a container throttled below the hard limit, with swap full, hung for minutes instead of being killed. |
 | `CONTAINERS_MEMORY_MAX` | `90%` | Hard limit for all containers together; above it the OOM killer stops a container process (within seconds in testing). |
 | `CONTAINERS_SWAP_MAX` | `4G` | Swap all containers together may use: a size or `infinity`. Keeps swap for the host. |
+| `CONTAINERS_TASKS_MAX` | `32768` | Processes and threads all containers together may have: a number or `infinity`. Stops a fork bomb before it exhausts the host; generous for `make -j`. |
+| `CONTAINERS_CPU_QUOTA` | empty | Hard CPU cap for all containers together, as a percentage of one CPU (`350%` = 3.5 CPUs). Empty means no cap. Lowering the containers' CPU priority was measured to make no difference, so there is no weight option. |
+| `SWAPPINESS` | empty | Kernel `vm.swappiness` (0-200). Empty keeps the default (60). Don't lower it: re-reading an evicted file from the volume costs about 5x more than swapping a page back in from the local disk. |
+
+`SWAP_SIZE` plus 4 GB must fit on the server type's local disk, otherwise
+creating the server fails early. Swap lives on the local disk and is lost on
+every stop. A tmpfs `/tmp` is charged to the container's memory limit, so it
+can't outgrow `CONTAINERS_MEMORY_MAX` plus `CONTAINERS_SWAP_MAX`. After the
+server is provisioned the provider warns if the volume is more than 85% full.
+
+Limitations: there are no per-container disk quotas (`--storage-opt size=`
+needs the overlay2 driver on XFS with `pquota`, not the containerd image
+store), no I/O weights and no network shaping. `hostRequirements` in
+`devcontainer.json` is not enforced by DevPod, so pick `MACHINE_TYPE` to
+match.
 
 #### Per-workspace settings
 
@@ -114,6 +129,8 @@ Everything that concerns a single dev container is set in its
 | Keep `/tmp` on disk | Leave it out: `/tmp` is then part of the container's filesystem, on the volume with `PERSIST_DOCKER` |
 | Enlarge shared memory (browsers, PyTorch data loaders) | `"runArgs": ["--shm-size=2g"]` |
 | Limit one container's memory or CPUs | `"runArgs": ["--memory=6g", "--cpus=2"]` (within `CONTAINERS_MEMORY_MAX`) |
+| Limit one container's swap | `"runArgs": ["--memory=6g", "--memory-swap=6g"]` (`--memory-swap` is memory plus swap; equal means no swap) |
+| Limit one container's processes or open files | `"runArgs": ["--pids-limit=4096", "--ulimit", "nofile=65536"]` |
 | Change log rotation | `"runArgs": ["--log-opt", "max-size=50m", "--log-opt", "max-file=3"]` |
 | Use another log driver | `"runArgs": ["--log-driver=json-file"]` |
 | Persist a directory per workspace | `"mounts": ["source=my-project-${devcontainerId}-data,target=/data,type=volume"]` |

@@ -52,4 +52,8 @@ const (
 	// volumeDetachTimeout bounds how long Create waits for the volume of a deleted
 	// server to be released before it can be attached to the new one.
 	volumeDetachTimeout = 2 * time.Minute
+	// swapDiskReserveGB is the local disk space kept free of swap for the OS and Docker's runtime files.
+	swapDiskReserveGB = 4
+	// diskWarnPercent is the volume usage from which provisioning warns.
+	diskWarnPercent = 85
 )

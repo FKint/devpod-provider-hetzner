@@ -101,6 +101,8 @@ jobs:
       # Non-default machine options, checked on the server by machine_options.sh
       SWAP_SIZE: "2"
       CONTAINERS_SWAP_MAX: "1G"
+      CONTAINERS_TASKS_MAX: "1234"
+      SWAPPINESS: "10"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -137,6 +139,9 @@ jobs:
         run: go run ./hack/provider check
 
       - run: go build -o provider .
+
+      - name: A swap file that does not fit is refused before anything is created
+        run: ./hack/e2e/swap_too_large.sh
 
       - name: Create command
         run: ./provider create

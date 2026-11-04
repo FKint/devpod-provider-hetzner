@@ -203,6 +203,11 @@ func (h *Hetzner) Create(
 		return h.startExisting(ctx, existing, privateKeyFile)
 	}
 
+	// Refuse before waiting on anything
+	if err := checkSwapFits(req.ServerType, machine); err != nil {
+		return err
+	}
+
 	// A volume that belonged to the server just deleted by a stop may take a moment to be released
 	volume, err := h.waitForVolumeDetached(ctx, req.Name)
 	if err != nil {
@@ -324,6 +329,23 @@ func (h *Hetzner) startExisting(ctx context.Context, server *hcloud.Server, priv
 	return nil
 }
 
+// checkSwapFits fails early when the swap file would not fit on the server's
+// local disk, instead of leaving a server that provisions but cannot swap.
+func checkSwapFits(serverType *hcloud.ServerType, machine *options.Machine) error {
+	if serverType == nil || serverType.Disk <= 0 || machine == nil {
+		return nil
+	}
+	// Hetzner disk sizes are decimal GB, the swap size is in bytes (GiB when configured)
+	const gb = 1_000_000_000
+	need := machine.SwapSizeBytes + swapDiskReserveGB*gb
+	if machine.SwapSizeBytes > 0 && need > int64(serverType.Disk)*gb {
+		return fmt.Errorf("%w: SWAP_SIZE=%d needs %.1fGB including %dGB for the system, but %s has a %dGB disk",
+			ErrSwapTooLarge, machine.SwapSizeBytes>>30, float64(need)/gb, swapDiskReserveGB, serverType.Name, serverType.Disk)
+	}
+
+	return nil
+}
+
 // rollback removes resources created by a failed Create. Failures are logged, not returned,
 // so the original error is what the caller sees.
 func (h *Hetzner) rollback(ctx context.Context, name string, server *hcloud.Server, volume *hcloud.Volume) {
@@ -379,6 +401,7 @@ func waitForProvisioned(ctx context.Context, server *hcloud.Server, privateKeyFi
 			authCount = 0
 		case isCloudInitDone(status.Status):
 			log.Default.Info("Server provisioned")
+			warnIfDiskFull(ctx, server.PublicNet.IPv4.IP.String(), privateKeyFile)
 			return nil
 		case isCloudInitFailed(status.Status):
 			authCount = 0
@@ -398,6 +421,55 @@ func waitForProvisioned(ctx context.Context, server *hcloud.Server, privateKeyFi
 		case <-time.After(provisionPoll):
 		}
 	}
+}
+
+// warnIfDiskFull logs a warning when the volume is nearly full, since a full
+// volume stops Docker and every workspace on the machine at once. Best effort.
+func warnIfDiskFull(ctx context.Context, addr string, privateKeyFile []byte) {
+	ctx, cancel := context.WithTimeout(ctx, sshAttemptTimeout)
+	defer cancel()
+
+	conn, err := newSSHClient(ctx, fmt.Sprintf("%s:%d", addr, SSHPort), privateKeyFile)
+	if err != nil {
+		log.Default.Debugf("Skipping the disk usage check: %v", err)
+		return
+	}
+	defer func() { _ = conn.Close() }()
+
+	// Each line is "<kind> <percent>" (an ext4 volume has a fixed number; xfs reports "-")
+	const home = "/home/" + SSHUsername
+	const cmd = "df -P " + home + " | awk 'NR==2{print \"space\", $5}'; " +
+		"df -Pi " + home + " | awk 'NR==2{print \"inodes\", $5}'"
+	out := new(bytes.Buffer)
+	if err := ssh.Run(ctx, conn, cmd, &bytes.Buffer{}, out, &bytes.Buffer{}, nil); err != nil {
+		log.Default.Debugf("Skipping the disk usage check: %v", err)
+		return
+	}
+
+	for _, msg := range diskUsageWarnings(out.String()) {
+		log.Default.Warn(msg)
+	}
+}
+
+// diskUsageWarnings turns the output of warnIfDiskFull's command (lines of
+// "<kind> <percent>") into warnings for usage above the threshold.
+func diskUsageWarnings(out string) []string {
+	var warnings []string
+	for _, line := range strings.Split(out, "\n") {
+		kind, value, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if !ok {
+			continue
+		}
+		pct, err := strconv.Atoi(strings.TrimSuffix(value, "%"))
+		if err != nil || pct < diskWarnPercent {
+			continue
+		}
+		warnings = append(warnings, fmt.Sprintf(
+			"The volume is %d%% full (%s). Docker and every workspace on this machine stop working when it fills up: "+
+				"raise DISK_SIZE and restart the machine, or free space (docker system prune, uv cache prune).", pct, kind))
+	}
+
+	return warnings
 }
 
 func isCloudInitDone(status string) bool {
