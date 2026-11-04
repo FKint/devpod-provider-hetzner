@@ -143,7 +143,7 @@ type renderedUserData struct {
 // defaultMachine returns the machine options as DevPod passes them by default.
 func defaultMachine(t *testing.T) *options.Machine {
 	t.Helper()
-	for _, env := range machineEnvs {
+	for _, env := range append([]string{options.EnvVolumeFormat}, options.MachineEnvs...) {
 		t.Setenv(env, "")
 	}
 	m, err := options.MachineFromEnv()
@@ -151,12 +151,6 @@ func defaultMachine(t *testing.T) *options.Machine {
 		t.FailNow()
 	}
 	return &m
-}
-
-var machineEnvs = []string{
-	options.EnvPersistDocker, options.EnvContainerdImageStore, options.EnvBuildCacheSize,
-	options.EnvPruneImagesAfter, options.EnvPruneAnonymousVolumes, options.EnvSwapSize,
-	options.EnvContainersMemoryHigh, options.EnvContainersMemoryMax, options.EnvContainersSwapMax,
 }
 
 func renderUserData(t *testing.T, machine *options.Machine) renderedUserData {

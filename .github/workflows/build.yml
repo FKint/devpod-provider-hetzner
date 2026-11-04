@@ -131,6 +131,12 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # Fails when the provider's default machine type is no longer offered by
+      # Hetzner, so a retired default is caught on the PR rather than at release.
+      # Creates no resources.
+      - name: Default machine type is still offered
+        run: go run ./hack/provider check
+
       - run: go build -o provider .
 
       - name: Create command
@@ -151,6 +157,10 @@ jobs:
       - name: New volume is XFS
         run: ./hack/e2e/volume_size.sh before 10
 
+      # Directly before the stop, so the data is still unflushed when it happens
+      - name: Write unflushed data
+        run: ./hack/e2e/graceful_stop.sh before
+
       - name: Stop command
         run: ./provider stop
 
@@ -165,6 +175,9 @@ jobs:
 
       - name: Volume and filesystem grew
         run: ./hack/e2e/volume_size.sh after 11
+
+      - name: Unflushed data survived the stop
+        run: ./hack/e2e/graceful_stop.sh after
 
       - name: Status is Running again
         run: ./hack/e2e/assert_status.sh Running
