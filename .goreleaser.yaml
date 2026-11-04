@@ -35,6 +35,8 @@ release:
   # provider.yaml (checksums and the live Hetzner options) is generated after the
   # build and added before the release is published, see build.yml
   draft: true
+  # Tags with a suffix such as -rc01 are marked as pre-releases
+  prerelease: auto
 
 changelog:
   groups:
