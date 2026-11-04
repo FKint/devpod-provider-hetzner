@@ -92,7 +92,7 @@ jobs:
       DISK_SIZE: "30"
       MACHINE_ID: test-${{ github.run_id }}
       MACHINE_FOLDER: ${{ github.workspace }}/.ssh
-      # The e2e tests deliberately use cpx22, which is not the provider default (cx32).
+      # The e2e tests deliberately use cpx22, which is not the provider default (cx33).
       # NOTE: Hetzner retires server types over time; if cpx22 is deprecated or
       # unavailable in REGION, pick a current small type and update this value.
       MACHINE_TYPE: "cpx22"
