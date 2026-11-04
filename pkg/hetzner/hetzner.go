@@ -274,50 +274,10 @@ func (h *Hetzner) Create(
 			return fmt.Errorf("%w: need at least %dGB, got %d", ErrDiskTooSmall, options.MinDiskSizeGB, diskSize)
 		}
 
-		// Create the volume as it doesn't exist
-		log.Default.Info("Creating a new volume")
-
-		// Marks this attempt's volume, so a lookup after a lost response can tell it
-		// from one a concurrent run created under the same name
-		attempt := rand.Text()
-		labels := maps.Clone(req.Labels)
-		if labels == nil {
-			labels = map[string]string{}
-		}
-		labels[labelCreateAttempt] = attempt
-
-		result, _, err := h.client.Volume.Create(ctx, hcloud.VolumeCreateOpts{
-			Location:  req.Location,
-			Name:      req.Name,
-			Size:      diskSize,
-			Format:    new(machine.VolumeFormat),
-			Automount: new(false),
-			Labels:    labels,
-		})
+		volume, err = h.createVolume(ctx, req, diskSize, machine, &createdVolume)
 		if err != nil {
-			// The volume may exist although the response got lost (e.g. a request
-			// timeout). It is ours only if it carries this attempt's label.
-			existing, lookupErr := h.volumeByName(context.WithoutCancel(ctx), req.Name)
-			switch {
-			case lookupErr != nil:
-				log.Default.Warnf("Could not check whether volume %s was created, remove it manually if it exists: %v",
-					req.Name, lookupErr)
-			case existing != nil && existing.Labels[labelCreateAttempt] == attempt:
-				createdVolume = existing
-			}
-
 			return err
 		}
-
-		volume = result.Volume
-		createdVolume = volume
-
-		if err := h.waitForActions(ctx, result.Action, result.NextActions...); err != nil {
-			log.Default.Errorf("Error in volume creation action: %s", err)
-			return err
-		}
-
-		log.Default.Info("Volume successfully created")
 	} else if err := h.growVolume(ctx, volume, diskSize); err != nil {
 		return err
 	}
@@ -347,6 +307,62 @@ func (h *Hetzner) Create(
 	log.Default.Info("Server created - provisioning")
 
 	return h.waitForProvisioned(ctx, createdServer, privateKeyFile, false)
+}
+
+// createVolume creates the machine's data volume and waits for it. The volume is stored
+// in created as soon as it is known to be ours, even when an error follows, so the
+// caller can remove it.
+func (h *Hetzner) createVolume(
+	ctx context.Context,
+	req *hcloud.ServerCreateOpts,
+	diskSize int,
+	machine *options.Machine,
+	created **hcloud.Volume,
+) (*hcloud.Volume, error) {
+	log.Default.Info("Creating a new volume")
+
+	// Marks this attempt's volume, so a lookup after a lost response can tell it
+	// from one a concurrent run created under the same name
+	attempt := rand.Text()
+	labels := maps.Clone(req.Labels)
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	labels[labelCreateAttempt] = attempt
+
+	result, _, err := h.client.Volume.Create(ctx, hcloud.VolumeCreateOpts{
+		Location:  req.Location,
+		Name:      req.Name,
+		Size:      diskSize,
+		Format:    new(machine.VolumeFormat),
+		Automount: new(false),
+		Labels:    labels,
+	})
+	if err != nil {
+		// The volume may exist although the response got lost (e.g. a request
+		// timeout). It is ours only if it carries this attempt's label.
+		existing, lookupErr := h.volumeByName(context.WithoutCancel(ctx), req.Name)
+		switch {
+		case lookupErr != nil:
+			log.Default.Warnf("Could not check whether volume %s was created, remove it manually if it exists: %v",
+				req.Name, lookupErr)
+		case existing != nil && existing.Labels[labelCreateAttempt] == attempt:
+			*created = existing
+		}
+
+		return nil, err
+	}
+
+	*created = result.Volume
+
+	if err := h.waitForActions(ctx, result.Action, result.NextActions...); err != nil {
+		log.Default.Errorf("Error in volume creation action: %s", err)
+		return nil, err
+	}
+
+	log.Default.Info("Volume successfully created")
+
+	return result.Volume, nil
 }
 
 // createServerWithRetry creates the server, once more if attaching its volume fails.

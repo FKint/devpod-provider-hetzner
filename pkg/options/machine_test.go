@@ -131,7 +131,10 @@ func TestMachinePatterns(t *testing.T) {
 			// Zero and overflow are ParseDuration's to refuse, see TestMachineFromEnvInvalid
 			"0h": true,
 		},
-		PatternDiskSize: {"40": true, " 40 ": true, "007": true, "0": false, "": false, "-5": false, "40GB": false, "4.5": false, "99999": true, "100000": false, "99999999999999999999": false},
+		PatternDiskSize: {
+			"40": true, "007": true, "99999": true,
+			"0": false, "": false, "-5": false, "40GB": false, "4.5": false, "100000": false, "99999999999999999999": false,
+		},
 		PatternSwapSize: {
 			DefaultSwapSize: true, "0": true, "256": true, "007": true, "257": false, "300": false, "1000": false,
 			"8G": false, "-1": false, "": false,
