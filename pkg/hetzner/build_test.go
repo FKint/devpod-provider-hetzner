@@ -152,6 +152,20 @@ func TestBuildServerOptionsNeedsAUsableMachineFolder(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// The public key is read before the private key, so it may be fine while the private key is not
+func TestBuildServerOptionsReportsAnUnreadablePrivateKey(t *testing.T) {
+	opts := testOptions(t)
+	require.NoError(t, os.WriteFile(filepath.Join(opts.MachineFolder, ssh.DevPodSSHPublicKeyFile), []byte("ssh-ed25519 AAAA test"), 0o600))
+	// A directory where the private key should be: it exists, but can't be read
+	require.NoError(t, os.Mkdir(filepath.Join(opts.MachineFolder, ssh.DevPodSSHPrivateKeyFile), 0o700))
+
+	cloud := newFakeCloud()
+	//nolint:dogsled // only the error is wanted
+	_, _, _, err := cloud.hetzner(t).BuildServerOptions(context.Background(), opts)
+	assert.ErrorContains(t, err, "read private ssh key")
+	assert.Zero(t, cloud.count("POST /ssh_keys"), "no key is uploaded without a private key")
+}
+
 func TestUpsertPublicKeyRejectsAnInvalidKey(t *testing.T) {
 	cloud := newFakeCloud()
 	_, err := cloud.hetzner(t).upsertPublicKey(context.Background(), "garbage", machineName)
