@@ -364,8 +364,9 @@ after a squash merge does not repeat the pull request's run, but a pull request
 whose base has moved since its run is tested again. Tag pushes and manual runs
 always run `e2e`.
 
-A run uses a `cx23` server plus a small volume, which costs about €0.02
-(€0.01 per started hour).
+A run creates two `cx23` servers (the `create`, then the recreation by `start`
+after `stop`) plus one small volume, which costs about €0.02 in servers
+(€0.01 per started server) plus a negligible amount for the volume.
 
 One-time repository setup (Settings → Environments):
 
