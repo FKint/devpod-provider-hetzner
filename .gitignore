@@ -10,3 +10,5 @@ Thumbs.db
 go.work.sum
 
 .claude/settings.local.json
+.claude/worktrees/
+.claude/.cc-writes/
