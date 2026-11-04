@@ -5,17 +5,17 @@ on:
       - main
     tags:
       - "v*.*.*"
+  # All branches, so stacked PRs (whose base is another feature branch) get e2e too
   pull_request:
     branches:
-      - main
+      - "**"
   workflow_dispatch:
 permissions:
   contents: read
   pull-requests: read
-# TODO: cancelling a run mid `provider create` can leak Hetzner resources if the
-# always() cleanup outlasts the cancellation grace period. Add a scheduled
-# workflow that deletes test-* servers/volumes/SSH keys older than ~1h, or stop
-# cancelling e2e runs.
+# Cancelling a run mid `provider create` can leak Hetzner resources if the
+# always() cleanup outlasts the cancellation grace period; sweep.yml deletes
+# test-* resources older than an hour.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -98,6 +98,9 @@ jobs:
       MACHINE_TYPE: "cpx22"
       REGION: "nbg1"
       SSH_KEY: ${{ secrets.SSH_KEY }}
+      # Non-default machine options, checked on the server by machine_options.sh
+      SWAP_SIZE: "2"
+      CONTAINERS_SWAP_MAX: "1G"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -132,28 +135,44 @@ jobs:
       - name: Create command
         run: ./provider create
 
+      - name: Status is Running
+        run: ./hack/e2e/assert_status.sh Running
+
       - name: Run command
-        env:
-          COMMAND: hostname
-        run: |
-          set -o pipefail
-          ./provider command | grep -F -- "${MACHINE_ID}"
+        run: ./hack/e2e/assert_hostname.sh
+
+      - name: Machine options reach the server
+        run: ./hack/e2e/machine_options.sh
+
+      - name: Create Docker state on the volume
+        run: ./hack/e2e/persistence.sh before
 
       - name: Stop command
         run: ./provider stop
 
+      - name: Status is Stopped
+        run: ./hack/e2e/assert_status.sh Stopped
+
       - name: Start command
         run: ./provider start
 
+      - name: Status is Running again
+        run: ./hack/e2e/assert_status.sh Running
+
       - name: Run command
-        env:
-          COMMAND: hostname
-        run: |
-          set -o pipefail
-          ./provider command | grep -F -- "${MACHINE_ID}"
+        run: ./hack/e2e/assert_hostname.sh
+
+      - name: Machine options reach the recreated server
+        run: ./hack/e2e/machine_options.sh
+
+      - name: Docker state survived the stop and start
+        run: ./hack/e2e/persistence.sh after
 
       - name: Delete command
         run: ./provider delete
+
+      - name: Status is NotFound
+        run: ./hack/e2e/assert_status.sh NotFound
 
       # This can fail due to resources failing to detach properly
       - name: Ensure destruction
