@@ -73,16 +73,17 @@ const PruneNever = "never"
 const maxSwapSizeGB = 256
 
 // Validation patterns, shared with the generated provider.yaml so DevPod
-// rejects bad values before the provider runs.
+// rejects bad values before the provider runs. No inline flags like (?i): the
+// UI may evaluate them as JavaScript regular expressions.
 const (
-	PatternDockerSize = `^(?i)\d+(\.\d+)?(B|KB|MB|GB|TB)$`
+	PatternDockerSize = `^\d+(\.\d+)?([KkMmGgTt]?[Bb])$`
 	// A percentage of RAM (at most two decimals, what systemd parses), a size with
 	// a K/M/G/T suffix, or infinity. Bare byte counts are refused: "85" is almost
 	// surely meant as 85%.
 	PatternSystemdMemory = `^(\d+(\.\d{1,2})?%|\d+[KMGT]|infinity)$`
 	// A size or infinity, for limits that systemd does not scale by RAM
 	PatternSystemdSize = `^(\d+[KMGT]|infinity)$`
-	PatternPruneAge    = `^((?i)never|(\d+(\.\d+)?[hms])+)$`
+	PatternPruneAge    = `^([Nn][Ee][Vv][Ee][Rr]|(\d+(\.\d+)?[hms])+)$`
 	PatternWholeNumber = `^\d+$`
 )
 

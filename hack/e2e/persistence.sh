@@ -53,10 +53,11 @@ before)
   remote "docker pull -q ${IMAGE}"
   remote "docker volume create ${VOLUME} >/dev/null &&
     docker run --rm -v ${VOLUME}:/data ${IMAGE} sh -c 'echo persisted > /data/marker'"
-  remote "echo persisted > ${MARKER}"
+  # sudo: ${DATA_DIR} is created by dockerd/containerd, owned by root
+  remote "echo persisted | sudo tee ${MARKER} >/dev/null"
   ;;
 after)
-  [ "$(remote "cat ${MARKER}" | tr -d '[:space:]')" = "persisted" ] ||
+  [ "$(remote "sudo cat ${MARKER}" | tr -d '[:space:]')" = "persisted" ] ||
     fail "marker file on the volume did not survive"
 
   remote "docker image inspect ${IMAGE} >/dev/null" ||
