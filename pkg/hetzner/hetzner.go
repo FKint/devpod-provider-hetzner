@@ -248,6 +248,10 @@ func (h *Hetzner) Create(
 			Labels:    req.Labels,
 		})
 		if err != nil {
+			// The volume may exist although the response got lost (e.g. a request
+			// timeout), and the name was free when we started, so it is ours
+			createdVolume, _ = h.volumeByName(context.WithoutCancel(ctx), req.Name)
+
 			return err
 		}
 
@@ -307,13 +311,17 @@ func (h *Hetzner) createServerWithRetry(ctx context.Context, req *hcloud.ServerC
 		log.Default.Warnf("Attaching the volume failed (%v), retrying with a new server", err)
 
 		if delErr := h.deleteServer(ctx, *created); delErr != nil {
-			// The caller's rollback tries again; the original error is what it sees
-			log.Default.Errorf("Unable to delete server %s: %v", (*created).Name, delErr)
-
-			return err
+			// *created stays set so the caller's rollback tries again
+			return fmt.Errorf("%w (deleting the failed server %s also failed: %v)", err, (*created).Name, delErr)
 		}
 
 		*created = nil
+
+		// The volume can stay attached to the deleted server for a moment, which
+		// would make the next create fail on a volume that is still in use
+		if _, err := h.waitForVolumeDetached(ctx, req.Name); err != nil {
+			return err
+		}
 	}
 }
 
@@ -327,6 +335,14 @@ func (h *Hetzner) createServer(ctx context.Context, req *hcloud.ServerCreateOpts
 		*created = server.Server
 	}
 	if err != nil {
+		if server.Server == nil {
+			// The server may exist although the response got lost (e.g. a request
+			// timeout). The name was free when Create started, so it is ours.
+			if existing, lookupErr := h.GetByName(context.WithoutCancel(ctx), req.Name); lookupErr == nil && existing != nil {
+				*created = existing
+			}
+		}
+
 		return err
 	}
 
@@ -694,7 +710,8 @@ func (h *Hetzner) deleteServer(ctx context.Context, server *hcloud.Server) error
 		err = h.deleteServerOnce(ctx, server)
 
 		var actionErr hcloud.ActionError
-		if err == nil || hcloud.IsError(err, hcloud.ErrorCodeNotFound) {
+		// Not found on a retry means the failed delete went through after all
+		if err == nil || (attempt > 1 && hcloud.IsError(err, hcloud.ErrorCodeNotFound)) {
 			return nil
 		} else if !errors.As(err, &actionErr) {
 			return err
