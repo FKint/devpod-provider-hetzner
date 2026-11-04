@@ -256,12 +256,10 @@ jobs:
           path: e2e-ok
           retention-days: 7
 
+  # Cross-compiles every platform, so a break shows on the PR instead of at release
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    outputs:
-      is_tag: ${{ steps.version.outputs.is_tag }}
-      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -272,82 +270,52 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - run: go version
-
-      - name: Generate version info
-        id: version
-        run: |
-          if [ "${GITHUB_REF_TYPE}" = "tag" ];
-          then
-            echo "is_tag=true" >> "$GITHUB_OUTPUT"
-            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          else
-            echo "is_tag=false" >> "$GITHUB_OUTPUT"
-            echo "version=development" >> "$GITHUB_OUTPUT"
-          fi
-
-          echo "commit_id=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-          echo "gitRepo=github.com/${GITHUB_REPOSITORY}" >> "$GITHUB_OUTPUT"
-
-      - name: Compile binaries
-        run: ./hack/build.sh
-        env:
-          GIT_COMMIT: ${{ steps.version.outputs.commit_id }}
-          GIT_REPO: ${{ steps.version.outputs.gitRepo }}
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
-          # provider.yaml needs the Hetzner API, so it is generated in publish
-          SKIP_PROVIDER_YAML: "true"
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
-          name: dist
-          path: dist/
+          version: "~> v2"
+          args: build --snapshot --clean
 
   publish:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: write
-      packages: write
     needs:
       - build
       - commitlint
       - e2e
       - test
-    if: needs.build.outputs.is_tag == 'true'
+    if: github.ref_type == 'tag'
     # Holds a READ-ONLY Hetzner API token (secret HCLOUD_TOKEN), used only to generate provider.yaml
     environment: Release
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the changelog is built from the history
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
 
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      # Builds the binaries and checksums and creates a DRAFT release with a
+      # changelog; the release is only published below, once provider.yaml is on it
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
-          name: dist
-          path: dist/
-
-      # Queries the Hetzner API for locations and server types (read-only token is enough)
-      - name: Generate provider.yaml
-        run: go run ./hack/provider "${{ needs.build.outputs.version }}" > dist/provider.yaml
-        env:
-          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "24"
-
-      - name: Build Changelog
-        id: github_release
-        uses: mikepenz/release-changelog-builder-action@b0db9d18b53447ef9f940a46c8f31653c4d9f621 # v6.5.0
+          version: "~> v2"
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Release
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
-        with:
-          body: ${{ steps.github_release.outputs.changelog }}
-          files: dist/*
+      # Queries the Hetzner API for locations and server types (read-only token is enough)
+      - name: Generate provider.yaml
+        run: go run ./hack/provider "${GITHUB_REF_NAME#v}" > dist/provider.yaml
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+
+      - name: Publish the release
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" dist/provider.yaml
+          gh release edit "${GITHUB_REF_NAME}" --draft=false

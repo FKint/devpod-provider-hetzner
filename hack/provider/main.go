@@ -81,7 +81,7 @@ func volumeFormatOption() *types.Option {
 type platform struct{ os, arch string }
 
 // binaryName is the file name of the provider binary for this platform, as
-// produced by hack/build.sh.
+// produced by goreleaser (see .goreleaser.yaml).
 func (p platform) binaryName() string {
 	name := fmt.Sprintf("devpod-provider-hetzner-%s-%s", p.os, p.arch)
 	if p.os == "windows" {

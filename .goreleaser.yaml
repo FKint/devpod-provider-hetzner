@@ -1,0 +1,48 @@
+version: 2
+project_name: devpod-provider-hetzner
+
+builds:
+  - main: .
+    # DevPod downloads one raw binary per platform, named like this
+    binary: devpod-provider-hetzner-{{ .Os }}-{{ .Arch }}
+    # Keeps dist/ flat, which is where hack/provider reads the binaries from
+    no_unique_dist_dir: true
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      # Keep in sync with the platforms in hack/provider/main.go
+      - goos: windows
+        goarch: arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/FKint/devpod-provider-hetzner/cmd.Version={{ .Version }}
+      - -X github.com/FKint/devpod-provider-hetzner/cmd.GitCommit={{ .FullCommit }}
+
+# The raw binaries are the release assets, not archives. goreleaser logs "artifact
+# already present" because the binary is its own archive; it uploads it once.
+archives:
+  - formats: [binary]
+    name_template: "{{ .Binary }}"
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  # provider.yaml (checksums and the live Hetzner options) is generated after the
+  # build and added before the release is published, see build.yml
+  draft: true
+
+changelog:
+  groups:
+    - title: Features
+      regexp: '^feat'
+      order: 0
+    - title: Fixes
+      regexp: '^fix'
+      order: 1
+    - title: Other
+      order: 2
