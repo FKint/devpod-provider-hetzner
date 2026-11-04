@@ -21,7 +21,9 @@ set -euo pipefail
 
 # SWAP_SIZE=2 (GB)
 swap="$(remote "swapon --noheadings --bytes --show=SIZE" | tr -d '[:space:]')"
-[ "${swap}" = "2147483648" ] || fail "swap is ${swap} bytes, expected 2147483648"
+# swapon reports the usable size, which is one page short of the file size
+[ "${swap}" -le 2147483648 ] && [ "${swap}" -ge 2146435072 ] ||
+  fail "swap is ${swap} bytes, expected about 2147483648"
 
 # CONTAINERS_SWAP_MAX=1G
 swap_max="$(remote "systemctl show devpod.slice -p MemorySwapMax --value" | tr -d '[:space:]')"
