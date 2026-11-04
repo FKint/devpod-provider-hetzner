@@ -138,6 +138,10 @@ jobs:
       - name: Run command
         run: ./hack/e2e/assert_hostname.sh
 
+      # Directly before the stop, so the data is still unflushed when it happens
+      - name: Write unflushed data
+        run: ./hack/e2e/graceful_stop.sh before
+
       - name: Stop command
         run: ./provider stop
 
@@ -146,6 +150,9 @@ jobs:
 
       - name: Start command
         run: ./provider start
+
+      - name: Unflushed data survived the stop
+        run: ./hack/e2e/graceful_stop.sh after
 
       - name: Status is Running again
         run: ./hack/e2e/assert_status.sh Running
