@@ -19,7 +19,6 @@ package cmd
 
 import (
 	"context"
-	"errors"
 
 	"github.com/FKint/devpod-provider-hetzner/pkg/hetzner"
 	"github.com/FKint/devpod-provider-hetzner/pkg/options"
@@ -56,11 +55,8 @@ func createOrStartServer(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if publicKey == nil {
-		return errors.New("no public key generated")
-	}
 
-	return h.Create(ctx, req, diskSize, &machine, *publicKey, privateKey)
+	return h.Create(ctx, req, diskSize, &machine, publicKey, privateKey)
 }
 
 func init() {

@@ -2,7 +2,6 @@
   "name": "devcontainer",
   "image": "ghcr.io/mrsimonemms/devcontainers/full",
   "features": {
-    "ghcr.io/mrsimonemms/devcontainers/cobra-cli:1": {},
     "ghcr.io/devcontainers-extra/features/gh-release:1": {
       "repo": "hetznercloud/cli",
       "binaryNames": "hcloud"
@@ -19,18 +18,14 @@
       ]
     }
   },
-  "postStartCommand": {
-    "copy-cobra": "ln -s $PWD/.cobra.yaml $HOME/.cobra.yaml",
-    "ensure-envrc": "touch .envrc"
-  },
+  "postStartCommand": "touch .envrc",
   "containerEnv": {
     "DEVPOD_LOG_LEVEL": "debug",
-    "GIT_REPO": "github.com/FKint/devpod-provider-hetzner",
     "DISK_IMAGE": "docker-ce",
     "DISK_SIZE": "30",
     "MACHINE_ID": "some-machine-id",
     "MACHINE_FOLDER": "/home/vscode/.ssh",
-    "MACHINE_TYPE": "cpx22",
+    "MACHINE_TYPE": "cx23",
     "REGION": "nbg1",
     "HCLOUD_TOKEN": ""
   }

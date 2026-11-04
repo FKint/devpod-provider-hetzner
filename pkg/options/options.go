@@ -55,8 +55,7 @@ func FromEnv(skipMachine bool) (*Options, error) {
 		}
 	}
 
-	// TOKEN is deprecated
-	retOptions.Token, err = fromEnvOrError("HCLOUD_TOKEN", "TOKEN")
+	retOptions.Token, err = fromEnvOrError("HCLOUD_TOKEN")
 	if err != nil {
 		return nil, err
 	}
@@ -93,17 +92,10 @@ func (o *Options) DiskSizeGB() (int, error) {
 	return size, nil
 }
 
-func fromEnvOrError(name string, fallback ...string) (string, error) {
-	envvars := append([]string{name}, fallback...)
-
-	for _, e := range envvars {
-		val := os.Getenv(e)
-		if val != "" {
-			return val, nil
-		}
+func fromEnvOrError(name string) (string, error) {
+	if val := os.Getenv(name); val != "" {
+		return val, nil
 	}
 
-	envvarCsv := strings.Join(envvars, ", ")
-
-	return "", fmt.Errorf("couldn't find option %s in environment, please make sure %s is defined", envvarCsv, envvarCsv)
+	return "", fmt.Errorf("couldn't find option %s in environment, please make sure it is defined", name)
 }

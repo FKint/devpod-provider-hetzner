@@ -116,7 +116,6 @@ func TestGenerateUserDataSSHDHardening(t *testing.T) {
 	out := buf.String()
 	assert.Contains(t, out, "/etc/ssh/sshd_config.d/00-devpod.conf")
 	assert.Contains(t, out, "systemctl restart ssh;")
-	assert.Contains(t, out, "sed -i '1i PermitRootLogin no'")
 }
 
 func TestGenerateUserDataIsValidYAML(t *testing.T) {

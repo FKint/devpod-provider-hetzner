@@ -25,7 +25,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/FKint/devpod-provider-hetzner/pkg/options"
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
@@ -398,15 +397,12 @@ func File(filePath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer func() {
-		err = file.Close()
-	}()
+	defer func() { _ = file.Close() }()
 
 	hash := sha256.New()
-	_, err = io.Copy(hash, file)
-	if err != nil {
+	if _, err := io.Copy(hash, file); err != nil {
 		return "", err
 	}
 
-	return strings.ToLower(hex.EncodeToString(hash.Sum(nil))), err
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
