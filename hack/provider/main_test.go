@@ -47,16 +47,11 @@ func TestBuildConfigIsValidProvider(t *testing.T) {
 	}
 
 	// Every machine option is exposed, grouped, and its default passes its own validation
-	machineOptions := []string{
-		options.EnvPersistDocker, options.EnvContainerdImageStore, options.EnvBuildCacheSize,
-		options.EnvPruneImagesAfter, options.EnvPruneAnonymousVolumes, options.EnvSwapSize,
-		options.EnvContainersMemoryHigh, options.EnvContainersMemoryMax, options.EnvContainersSwapMax,
-	}
 	var grouped []string
 	for _, g := range parsed.OptionGroups {
 		grouped = append(grouped, g.Options...)
 	}
-	for _, name := range machineOptions {
+	for _, name := range options.MachineEnvs {
 		opt, ok := parsed.Options[name]
 		if !assert.True(t, ok, name) {
 			continue

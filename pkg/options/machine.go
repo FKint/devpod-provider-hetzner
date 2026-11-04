@@ -40,6 +40,13 @@ const (
 	EnvContainersSwapMax     = "CONTAINERS_SWAP_MAX"
 )
 
+// MachineEnvs lists every machine option, for grouping and for tests.
+var MachineEnvs = []string{
+	EnvPersistDocker, EnvContainerdImageStore, EnvBuildCacheSize,
+	EnvPruneImagesAfter, EnvPruneAnonymousVolumes, EnvSwapSize,
+	EnvContainersMemoryHigh, EnvContainersMemoryMax, EnvContainersSwapMax,
+}
+
 // Defaults for the machine options, shared with the generated provider.yaml.
 const (
 	DefaultPersistDocker         = "true"

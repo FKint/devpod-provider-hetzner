@@ -28,11 +28,16 @@ HOME_DIR="/home/devpod"
 DATA_DIR="${HOME_DIR}/.devpod"
 MARKER="${DATA_DIR}/e2e-marker"
 
+assert_docker_root() {
+  local root
+  root="$(remote "docker info -f '{{.DockerRootDir}}'" | tr -d '[:space:]')"
+  [ "${root}" = "${DATA_DIR}/docker" ] || fail "Docker root is ${root}, expected ${DATA_DIR}/docker"
+}
+
 case "${1:?usage: persistence.sh before|after}" in
 before)
   # Where the state lives
-  root="$(remote "docker info -f '{{.DockerRootDir}}'" | tr -d '[:space:]')"
-  [ "${root}" = "${DATA_DIR}/docker" ] || fail "Docker root is ${root}, expected ${DATA_DIR}/docker"
+  assert_docker_root
 
   remote "docker info -f '{{.DriverStatus}}'" | grep -F -- "io.containerd.snapshotter.v1" ||
     fail "Docker is not using the containerd image store"
@@ -61,8 +66,7 @@ after)
   [ "$(remote "docker run --rm --pull=never -v ${VOLUME}:/data ${IMAGE} cat /data/marker" | tr -d '[:space:]')" = "persisted" ] ||
     fail "named volume ${VOLUME} did not survive"
 
-  root="$(remote "docker info -f '{{.DockerRootDir}}'" | tr -d '[:space:]')"
-  [ "${root}" = "${DATA_DIR}/docker" ] || fail "Docker root is ${root} after the start"
+  assert_docker_root
   ;;
 *)
   fail "usage: persistence.sh before|after"

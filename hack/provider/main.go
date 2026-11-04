@@ -47,12 +47,9 @@ const (
 	checkOnlyArg = "check"
 )
 
-const (
-	optionTrue  = "true"
-	optionFalse = "false"
-)
+const optionTrue = "true"
 
-var boolEnum = types.OptionEnumArray{{Value: optionTrue}, {Value: optionFalse}}
+var boolEnum = types.OptionEnumArray{{Value: optionTrue}, {Value: "false"}}
 
 const memoryMessage = "Use a percentage of RAM (e.g. 90%), a size (e.g. 7G) or infinity."
 
@@ -223,17 +220,7 @@ func BuildConfig(
 			{
 				Name:           "Docker options",
 				DefaultVisible: false,
-				Options: []string{
-					options.EnvPersistDocker,
-					options.EnvContainerdImageStore,
-					options.EnvBuildCacheSize,
-					options.EnvPruneImagesAfter,
-					options.EnvPruneAnonymousVolumes,
-					options.EnvSwapSize,
-					options.EnvContainersMemoryHigh,
-					options.EnvContainersMemoryMax,
-					options.EnvContainersSwapMax,
-				},
+				Options:        options.MachineEnvs,
 			},
 			{
 				Name:           "Agent options",
