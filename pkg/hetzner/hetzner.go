@@ -503,6 +503,9 @@ func (h *Hetzner) waitForProvisioned(
 func warnIfDiskFull(ctx context.Context, conn *cryptoSsh.Client) {
 	// Each line is "<kind> <percent>" (an ext4 volume has a fixed number; xfs reports "-")
 	const home = "/home/" + SSHUsername
+	ctx, cancel := context.WithTimeout(ctx, diskCheckTimeout)
+	defer cancel()
+
 	const cmd = "df -P " + home + " | awk 'NR==2{print \"space\", $5}'; " +
 		"df -Pi " + home + " | awk 'NR==2{print \"inodes\", $5}'"
 	out := new(bytes.Buffer)
@@ -879,11 +882,11 @@ func attemptConnection(ctx context.Context, ip string, privateKeyFile []byte) (*
 	log.Default.Debug("Checking server provision status")
 
 	// Bound the whole attempt (handshake and command) so a hung sshd can't outlive the provisioning deadline
-	ctx, cancel := context.WithTimeout(ctx, sshAttemptTimeout)
+	attemptCtx, cancel := context.WithTimeout(ctx, sshAttemptTimeout)
 	defer cancel()
 
 	// Check the server is provisioned - this runs "ssh user@path cloud-init status"
-	sshClient, err := DialSSH(ctx, ip, privateKeyFile)
+	sshClient, err := DialSSH(attemptCtx, ip, privateKeyFile)
 	switch {
 	case errors.Is(err, errUnreachable):
 		log.Default.Debugf("Server not reachable yet: %v", err)
@@ -903,7 +906,7 @@ func attemptConnection(ctx context.Context, ip string, privateKeyFile []byte) (*
 	}()
 
 	buf := new(bytes.Buffer)
-	if err := ssh.Run(ctx, sshClient, "cloud-init status || true", &bytes.Buffer{}, buf, &bytes.Buffer{}, nil); err != nil {
+	if err := ssh.Run(attemptCtx, sshClient, "cloud-init status || true", &bytes.Buffer{}, buf, &bytes.Buffer{}, nil); err != nil {
 		log.Default.Errorf("Error retrieving cloud-init status, %v", err)
 		return nil, err
 	}
@@ -915,6 +918,7 @@ func attemptConnection(ctx context.Context, ip string, privateKeyFile []byte) (*
 	}
 
 	if isCloudInitDone(status.Status) {
+		// Own time budget, so a slow handshake doesn't silently skip the check
 		warnIfDiskFull(ctx, sshClient)
 	}
 

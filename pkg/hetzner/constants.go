@@ -47,6 +47,8 @@ const (
 	sshDialTimeout          = 5 * time.Second
 	authFailureThreshold    = 5
 	sshAttemptTimeout       = time.Minute
+	// diskCheckTimeout bounds the disk usage check run over an established connection.
+	diskCheckTimeout = 15 * time.Second
 	// statusTimeout bounds how long the CLI waits for a machine to reach a status.
 	statusTimeout = 5 * time.Minute
 	statusPoll    = time.Second
