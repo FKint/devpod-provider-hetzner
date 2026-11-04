@@ -30,7 +30,7 @@ fs_bytes() {
 }
 
 volume_gb() {
-  hcloud volume list -l "machineId=${MACHINE_ID}" -o noheader -o columns=size | tr -d '[:space:]'
+  hcloud volume list -l "machineId=${MACHINE_ID}" -o noheader -o columns=size | tr -cd '0-9'
 }
 
 usage="usage: volume_size.sh before|after <size-gb>"
