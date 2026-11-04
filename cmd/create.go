@@ -51,12 +51,7 @@ func createOrStartServer(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	h := hetzner.NewHetzner(opts.Token)
 
-	req, publicKey, privateKey, err := h.BuildServerOptions(ctx, opts)
-	if err != nil {
-		return err
-	}
-
-	return h.Create(ctx, req, diskSize, &machine, publicKey, privateKey)
+	return h.CreateMachine(ctx, opts, diskSize, &machine)
 }
 
 func init() {

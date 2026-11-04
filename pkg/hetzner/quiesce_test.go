@@ -86,9 +86,13 @@ func TestQuiesceLocalSkipsDockerStopWithoutContainers(t *testing.T) {
 
 // A failing docker must not stop the disks from being synced
 func TestQuiesceLocalSyncsWhenDockerFails(t *testing.T) {
-	logPath := useFakeDocker(t, "", 1)
+	logPath := useFakeDocker(t, "abc", 1)
 
 	(&Hetzner{}).quiesceLocal(t.Context())
 
-	assert.Equal(t, []string{callDockerPs, callSync}, readCalls(t, logPath))
+	assert.Equal(t, []string{
+		callDockerPs,
+		fmt.Sprintf("docker stop -t %d abc", containerStopGrace),
+		callSync,
+	}, readCalls(t, logPath))
 }

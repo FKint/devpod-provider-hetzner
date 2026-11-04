@@ -89,7 +89,7 @@ func TestMachineFromEnvInvalid(t *testing.T) {
 		EnvPersistDocker:         {"yes please"},
 		EnvContainerdImageStore:  {"maybe"},
 		EnvBuildCacheSize:        {"5", "5 GB", "5GiB", "-1GB", "5GB; rm -rf /"},
-		EnvPruneImagesAfter:      {"7d", "0", "-1h", "1h || true", "+168h", "1h30m5ms", "1\u00b5s"},
+		EnvPruneImagesAfter:      {"7d", "0", "0h", "0s", "0.0m", "-1h", "1h || true", "+168h", "1h30m5ms", "1\u00b5s"},
 		EnvPruneAnonymousVolumes: {"2"},
 		EnvSwapSize:              {"-1", "8G", "1000"},
 		EnvContainersMemoryHigh:  {"85", "101%", "6GB", "6G\nMemoryMax=1", "0%", "0G", "85.555%"},

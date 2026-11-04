@@ -192,6 +192,22 @@ func (h *Hetzner) BuildServerOptions(
 	}, string(publicKey), privateKey, nil
 }
 
+// CreateMachine creates, or starts, the machine described by opts: it looks up the
+// region, server type and image, uploads the SSH key and then runs Create.
+func (h *Hetzner) CreateMachine(
+	ctx context.Context,
+	opts *options.Options,
+	diskSize int,
+	machine *options.Machine,
+) error {
+	req, publicKey, privateKey, err := h.BuildServerOptions(ctx, opts)
+	if err != nil {
+		return err
+	}
+
+	return h.Create(ctx, req, diskSize, machine, publicKey, privateKey)
+}
+
 func (h *Hetzner) Create(
 	ctx context.Context,
 	req *hcloud.ServerCreateOpts,

@@ -138,6 +138,8 @@ type fakeSSHD struct {
 	hang bool
 	// dfOutput is what the disk usage command prints
 	dfOutput string
+	// dfFails makes the disk usage command exit with an error
+	dfFails bool
 	// statusOutput replaces the cloud-init status report when set
 	statusOutput string
 	// statusExit is the exit status of the cloud-init status command
@@ -274,6 +276,9 @@ func (d *fakeSSHD) exitStatus(command string) uint32 {
 
 	if strings.HasPrefix(command, "cloud-init status") {
 		return d.statusExit
+	}
+	if d.dfFails && strings.HasPrefix(command, "df ") {
+		return 1
 	}
 
 	return 0

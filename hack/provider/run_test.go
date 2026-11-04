@@ -19,15 +19,24 @@ package main
 import (
 	"bytes"
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
+	"github.com/loft-sh/devpod/pkg/provider"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-const binary = "provider"
+const (
+	binary         = "provider"
+	testVersion    = "1.0.0"
+	releaseVersion = "1.2.3"
+)
 
 func TestFileSHA256(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "binary")
@@ -46,15 +55,118 @@ func TestFileSHA256(t *testing.T) {
 func TestRunValidatesItsInputBeforeCallingTheAPI(t *testing.T) {
 	t.Setenv("HCLOUD_TOKEN", "")
 
-	for _, args := range [][]string{{binary}, {binary, "1.0.0", "extra"}} {
+	for _, args := range [][]string{{binary}, {binary, testVersion, "extra"}} {
 		out := new(bytes.Buffer)
 		err := run(context.Background(), args, out)
 		assert.ErrorContains(t, err, "usage", args)
 		assert.Empty(t, out.String())
 	}
 
-	err := run(context.Background(), []string{binary, "1.0.0"}, new(bytes.Buffer))
+	err := run(context.Background(), []string{binary, testVersion}, new(bytes.Buffer))
 	assert.ErrorContains(t, err, "HCLOUD_TOKEN")
 	err = run(context.Background(), []string{binary, checkOnlyArg}, new(bytes.Buffer))
 	assert.ErrorContains(t, err, "HCLOUD_TOKEN")
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// useFakeAPI answers the Hetzner API with canned lists. run builds its own client on
+// http.DefaultTransport, so replacing that keeps every request in-process. It is
+// global state: the tests using it must not run in parallel. serverTypes is the JSON
+// array of server types; an empty string makes every request fail with a 401.
+func useFakeAPI(t *testing.T, serverTypes string) {
+	t.Helper()
+
+	original := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		rec := httptest.NewRecorder()
+		rec.Header().Set("Content-Type", "application/json")
+		switch {
+		case serverTypes == "":
+			rec.WriteHeader(http.StatusUnauthorized)
+			_, _ = rec.WriteString(`{"error":{"code":"unauthorized","message":"denied"}}`) //nolint:misspell // the API's code
+		case strings.HasSuffix(r.URL.Path, "/locations"):
+			_, _ = rec.WriteString(`{"locations":[{"id":1,"name":"nbg1","city":"Nuremberg"},{"id":2,"name":"fsn1","city":"Falkenstein"}]}`)
+		case strings.HasSuffix(r.URL.Path, "/server_types"):
+			_, _ = rec.WriteString(`{"server_types":` + serverTypes + `}`)
+		default:
+			rec.WriteHeader(http.StatusNotFound)
+			_, _ = rec.WriteString(`{"error":{"code":"not_found","message":"unexpected request"}}`)
+		}
+
+		return rec.Result(), nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = original })
+}
+
+const (
+	offeredTypes = `[{"id":1,"name":"cx33","cores":4,"memory":8},` +
+		`{"id":2,"name":"cx22","cores":2,"memory":4,` +
+		`"deprecation":{"announced":"2026-01-01T00:00:00Z","unavailable_after":"2026-06-01T00:00:00Z"}}]`
+	retiredDefault = `[{"id":2,"name":"cx22","cores":2,"memory":4}]`
+)
+
+// writeDist creates dist/ with a binary for every platform, in a directory that becomes
+// the working directory (run reads the binaries from ./dist).
+func writeDist(t *testing.T, missing ...string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "dist"), 0o700))
+	for _, p := range platforms {
+		if !slices.Contains(missing, p.binaryName()) {
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "dist", p.binaryName()), []byte(p.binaryName()), 0o600))
+		}
+	}
+	t.Chdir(dir)
+}
+
+func TestRunCheckOnlyVerifiesTheDefaultMachineType(t *testing.T) {
+	t.Setenv("HCLOUD_TOKEN", "token")
+
+	useFakeAPI(t, offeredTypes)
+	out := new(bytes.Buffer)
+	assert.NoError(t, run(context.Background(), []string{binary, checkOnlyArg}, out))
+	assert.Empty(t, out.String(), "check generates nothing")
+
+	useFakeAPI(t, retiredDefault)
+	assert.ErrorContains(t, run(context.Background(), []string{binary, checkOnlyArg}, new(bytes.Buffer)), defaultMachineType)
+}
+
+func TestRunReportsAPIErrors(t *testing.T) {
+	t.Setenv("HCLOUD_TOKEN", "token")
+	useFakeAPI(t, "")
+
+	assert.ErrorContains(t, run(context.Background(), []string{binary, testVersion}, new(bytes.Buffer)), "denied")
+}
+
+func TestRunGeneratesAValidProviderYAML(t *testing.T) {
+	t.Setenv("HCLOUD_TOKEN", "token")
+	useFakeAPI(t, offeredTypes)
+	writeDist(t)
+
+	out := new(bytes.Buffer)
+	require.NoError(t, run(context.Background(), []string{binary, releaseVersion}, out))
+
+	parsed, err := provider.ParseProvider(bytes.NewReader(out.Bytes()))
+	require.NoError(t, err)
+	assert.Equal(t, "v"+releaseVersion, parsed.Version)
+	assert.Equal(t, "nbg1", parsed.Options["REGION"].Default)
+	assert.Contains(t, out.String(), "Falkenstein", "every location is offered")
+	assert.Contains(t, out.String(), "4 vCPUs, 8 GB RAM (cx33)")
+	assert.NotContains(t, out.String(), "cx22", "a deprecated server type is not offered")
+	assert.Contains(t, out.String(), "v"+releaseVersion+"/devpod-provider-hetzner-linux-amd64")
+}
+
+func TestRunNeedsEveryBinary(t *testing.T) {
+	t.Setenv("HCLOUD_TOKEN", "token")
+	useFakeAPI(t, offeredTypes)
+	writeDist(t, platforms[2].binaryName())
+
+	out := new(bytes.Buffer)
+	err := run(context.Background(), []string{binary, releaseVersion}, out)
+	assert.ErrorContains(t, err, platforms[2].binaryName())
+	assert.Empty(t, out.String(), "no half-generated provider.yaml")
 }

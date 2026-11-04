@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strconv"
 	"strings"
@@ -80,6 +81,13 @@ type fakeCloud struct {
 	// failing makes requests matching "METHOD /path" (the path without ids, e.g.
 	// "POST /servers" or "DELETE /volumes/*") fail with a server error
 	failing map[string]bool
+	// failingActions makes the matching requests succeed but report a failed action
+	failingActions map[string]bool
+	// okBefore makes the matching requests fail once they have been served that many times
+	okBefore map[string]int
+	// lostResponse makes the matching requests take effect but answer with an error,
+	// like a request that timed out after the server processed it
+	lostResponse map[string]bool
 	// serverStatusOnCreate is the status a created server reports (default statusRunning)
 	serverStatusOnCreate string
 	// unknown makes the lookup of that kind find nothing: "location", "server_type" or "image"
@@ -98,6 +106,10 @@ func newFakeCloud() *fakeCloud {
 		keys:    map[int64]*cloudKey{},
 		failing: map[string]bool{},
 		unknown: map[string]bool{},
+
+		failingActions: map[string]bool{},
+		okBefore:       map[string]int{},
+		lostResponse:   map[string]bool{},
 	}
 }
 
@@ -121,6 +133,47 @@ func (f *fakeCloud) heal() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	clear(f.failing)
+	clear(f.failingActions)
+	clear(f.okBefore)
+	clear(f.lostResponse)
+}
+
+// failAction makes the matching requests report a failed action, e.g. failAction(reqPoweron).
+func (f *fakeCloud) failAction(patterns ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, p := range patterns {
+		f.failingActions[p] = true
+	}
+}
+
+// failAfter lets the first n matching requests succeed and fails the rest.
+func (f *fakeCloud) failAfter(request string, n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.okBefore[request] = n
+}
+
+// loseResponse makes the matching requests take effect but answer with an error.
+func (f *fakeCloud) loseResponse(patterns ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, p := range patterns {
+		f.lostResponse[p] = true
+	}
+}
+
+// action is the action a request reports: a failed one when failAction asked for it.
+// It runs with f.mu held.
+func (f *fakeCloud) action(r *http.Request) cloudObject {
+	if !f.failingActions[pattern(r)] {
+		return fakeAction()
+	}
+
+	return cloudObject{
+		keyID: 9, keyStatus: statusError, keyProgress: 100, keyCommand: "injected",
+		keyError: cloudObject{keyCode: codeUnknownError, keyMessage: "injected action failure for " + pattern(r)},
+	}
 }
 
 // seedVolume adds an existing volume, as left behind by a stopped machine.
@@ -242,10 +295,10 @@ var routes = map[string]route{
 	"POST /volumes":     (*fakeCloud).createVolume,
 	"DELETE /volumes/*": (*fakeCloud).deleteVolume,
 	"POST /volumes/*/actions/detach": func(f *fakeCloud, w http.ResponseWriter, r *http.Request) {
-		if v := f.volumes[pathID(r)]; v != nil {
+		if v := f.volumes[pathID(r)]; v != nil && !f.failingActions[pattern(r)] {
 			v.Server = 0
 		}
-		reply(w, cloudObject{keyAction: fakeAction()})
+		reply(w, cloudObject{keyAction: f.action(r)})
 	},
 	"POST /volumes/*/actions/resize": func(f *fakeCloud, w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -255,7 +308,7 @@ var routes = map[string]route{
 		if v := f.volumes[pathID(r)]; v != nil {
 			v.Size = body.Size
 		}
-		reply(w, cloudObject{keyAction: fakeAction()})
+		reply(w, cloudObject{keyAction: f.action(r)})
 	},
 }
 
@@ -265,6 +318,13 @@ func (f *fakeCloud) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	p := pattern(r)
 	f.requests = append(f.requests, p)
+	if n, ok := f.okBefore[p]; ok {
+		if n <= 0 {
+			writeAPIError(w, http.StatusInternalServerError, "server_error", "injected failure for "+p)
+			return
+		}
+		f.okBefore[p] = n - 1
+	}
 	if f.failing[p] {
 		writeAPIError(w, http.StatusInternalServerError, "server_error", "injected failure for "+p)
 		return
@@ -273,6 +333,12 @@ func (f *fakeCloud) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	handle, ok := routes[p]
 	if !ok {
 		writeAPIError(w, http.StatusNotFound, "not_found", "fake cloud has no "+p)
+		return
+	}
+	if f.lostResponse[p] {
+		// The request is processed, but its answer never arrives
+		handle(f, httptest.NewRecorder(), r)
+		writeAPIError(w, http.StatusGatewayTimeout, "timeout", "lost response for "+p)
 		return
 	}
 	handle(f, w, r)
@@ -448,7 +514,7 @@ func (f *fakeCloud) setServerStatus(w http.ResponseWriter, r *http.Request, stat
 	if s := f.servers[pathID(r)]; s != nil {
 		s.Status = status
 	}
-	reply(w, cloudObject{keyAction: fakeAction()})
+	reply(w, cloudObject{keyAction: f.action(r)})
 }
 
 func (f *fakeCloud) volumeObject(v *cloudVolume) cloudObject {
@@ -480,7 +546,7 @@ func (f *fakeCloud) createVolume(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	v := &cloudVolume{ID: f.id(), Name: body.Name, Size: body.Size, Labels: body.Labels}
 	f.volumes[v.ID] = v
-	reply(w, cloudObject{"volume": f.volumeObject(v), keyAction: fakeAction(), "next_actions": []any{}})
+	reply(w, cloudObject{"volume": f.volumeObject(v), keyAction: f.action(r), "next_actions": []any{}})
 }
 
 func (f *fakeCloud) deleteVolume(w http.ResponseWriter, r *http.Request) {
