@@ -396,16 +396,12 @@ func checkMachineTypeOffered(def string, offered types.OptionEnumArray) error {
 
 // fileSHA256 returns the hex sha256 of a file.
 func fileSHA256(filePath string) (string, error) {
-	f, err := os.Open(filePath)
+	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
 
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
+	sum := sha256.Sum256(data)
 
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return hex.EncodeToString(sum[:]), nil
 }

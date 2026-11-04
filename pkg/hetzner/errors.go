@@ -29,7 +29,7 @@ var (
 	ErrVolumeAttached       = errors.New("volume is attached to another server")
 	ErrSwapTooLarge         = errors.New("swap does not fit on the server's local disk")
 	errSSHAuth              = errors.New("ssh authentication failed")
-	ErrUnreachable          = errors.New("ssh server unreachable")
+	errUnreachable          = errors.New("ssh server unreachable")
 	ErrMultipleServersFound = func(name string) error {
 		return fmt.Errorf("multiple server with name %s found", name)
 	}

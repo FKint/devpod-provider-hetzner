@@ -389,11 +389,6 @@ func waitForProvisioned(ctx context.Context, server *hcloud.Server, privateKeyFi
 			if failOnAuth && authCount >= authFailureThreshold {
 				return false, fmt.Errorf("%w: server %s refused this machine's SSH key", ErrProvisioningFailed, server.Name)
 			}
-		case isContextErr(err) && ctx.Err() == nil:
-			// The attempt hit its own deadline, not the provisioning one: sshd accepts
-			// connections but does not answer, which a booting server would not do
-			authCount = 0
-			log.Default.Warnf("SSH attempt timed out after %s, retrying: %v", sshAttemptTimeout, err)
 		case err != nil:
 			// Not reachable yet, or a transient failure. Only answers from cloud-init
 			// count towards the consecutive "error" reports, so leave the count alone.
@@ -791,7 +786,7 @@ func attemptConnection(ctx context.Context, ip string, privateKeyFile []byte) (*
 	// Check the server is provisioned - this runs "ssh user@path cloud-init status"
 	sshClient, err := DialSSH(attemptCtx, ip, privateKeyFile)
 	switch {
-	case errors.Is(err, ErrUnreachable):
+	case errors.Is(err, errUnreachable):
 		log.Default.Debugf("Server not reachable yet: %v", err)
 		return nil, err
 	case err != nil:
@@ -832,7 +827,7 @@ func attemptConnection(ctx context.Context, ip string, privateKeyFile []byte) (*
 // is bounded: connecting is limited by sshDialTimeout, the whole handshake by
 // sshAttemptTimeout and by ctx, and the connection is closed if ctx ends first.
 // A server that is still booting (or filtered) therefore costs seconds, not minutes.
-// It returns ErrUnreachable when the TCP connection could not be made.
+// It returns errUnreachable when the TCP connection could not be made.
 func DialSSH(ctx context.Context, ip string, privateKey []byte) (*cryptoSsh.Client, error) {
 	config, err := ssh.ConfigFromKeyBytes(privateKey)
 	if err != nil {
@@ -846,7 +841,7 @@ func DialSSH(ctx context.Context, ip string, privateKey []byte) (*cryptoSsh.Clie
 	target := net.JoinHostPort(ip, strconv.Itoa(SSHPort))
 	conn, err := (&net.Dialer{Timeout: sshDialTimeout}).DialContext(ctx, "tcp", target)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrUnreachable, err)
+		return nil, fmt.Errorf("%w: %w", errUnreachable, err)
 	}
 
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
