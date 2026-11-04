@@ -56,7 +56,26 @@ jobs:
         run: go vet -v ./...
 
       - name: go-test
-        run: go test -v ./...
+        run: go test -v -covermode=atomic -coverprofile=coverage.out ./...
+
+      - name: Coverage report
+        run: |
+          go tool cover -html=coverage.out -o coverage.html
+          {
+            echo "### Test coverage"
+            echo
+            echo '```'
+            go tool cover -func=coverage.out
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage
+          path: |
+            coverage.out
+            coverage.html
+          retention-days: 14
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
@@ -72,6 +91,15 @@ jobs:
 
       - name: pre-commit
         run: pre-commit run --show-diff-on-failure --color=always --all-files
+
+      # Feeds the README badge. Not fatal, so a Codecov outage cannot fail the build.
+      # Runs after pre-commit: the action downloads files into the workspace that
+      # license-eye would flag.
+      - uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: coverage.out
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
 
   # Looks for a recorded, successful e2e run of exactly this code (same git tree), so
   # that e.g. the push to main after a squash merge does not repeat the PR's run. The
