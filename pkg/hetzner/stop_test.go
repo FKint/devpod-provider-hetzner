@@ -21,14 +21,16 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 	"github.com/stretchr/testify/assert"
 )
+
+// failedActionID is the ID of the action the fake API reports as failed
+const failedActionID = 2
 
 const (
 	callShutdown = "shutdown"
@@ -41,10 +43,13 @@ type fakeStopAPI struct {
 	calls []string
 	// shutdownFails makes the shutdown request fail
 	shutdownFails bool
-	// offAfter is how many status lookups report "running" before the server is off;
+	// offAfter is how many status lookups report statusRunning before the server is off;
 	// negative means it never powers off.
 	offAfter int
 	lookups  int
+	// deleteActionFailures is how many delete actions end in an error before one succeeds
+	deleteActionFailures int
+	deletes              int
 }
 
 func (f *fakeStopAPI) record(s string) {
@@ -61,12 +66,12 @@ func (f *fakeStopAPI) called() []string {
 
 func (f *fakeStopAPI) handler() http.Handler {
 	server := func(status string) map[string]any {
-		return map[string]any{keyID: 5, keyName: "machine", keyStatus: status}
+		return map[string]any{keyID: 5, keyName: machineName, keyStatus: status}
 	}
-	action := map[string]any{"action": map[string]any{keyID: 1, keyStatus: "success", "progress": 100}}
+	action := map[string]any{keyAction: map[string]any{keyID: 1, keyStatus: statusSuccess, keyProgress: 100}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/servers", func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"servers": []any{server("running")}})
+		_ = json.NewEncoder(w).Encode(map[string]any{keyServers: []any{server(statusRunning)}})
 	})
 	mux.HandleFunc("/servers/5/actions/shutdown", func(w http.ResponseWriter, _ *http.Request) {
 		f.record(callShutdown)
@@ -76,20 +81,35 @@ func (f *fakeStopAPI) handler() http.Handler {
 		}
 		_ = json.NewEncoder(w).Encode(action)
 	})
-	mux.HandleFunc("/actions", func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"actions": []any{action["action"]}})
+	mux.HandleFunc("/actions", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("id") == strconv.Itoa(failedActionID) {
+			failed := map[string]any{
+				keyID: failedActionID, keyStatus: statusError, keyCommand: "delete_server",
+				keyError: map[string]any{keyCode: codeUnknownError, keyMessage: "boom"},
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{keyActions: []any{failed}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{keyActions: []any{action[keyAction]}})
 	})
 	mux.HandleFunc("/servers/5", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
 			f.record(callDelete)
-			_ = json.NewEncoder(w).Encode(action)
+			f.mu.Lock()
+			f.deletes++
+			id := 1
+			if f.deletes <= f.deleteActionFailures {
+				id = failedActionID
+			}
+			f.mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{keyAction: map[string]any{keyID: id, keyStatus: statusRunning}})
 			return
 		}
 		f.mu.Lock()
 		f.lookups++
 		off := f.offAfter >= 0 && f.lookups > f.offAfter
 		f.mu.Unlock()
-		status := "running"
+		status := statusRunning
 		if off {
 			status = "off"
 		}
@@ -101,23 +121,9 @@ func (f *fakeStopAPI) handler() http.Handler {
 
 func (f *fakeStopAPI) hetzner(t *testing.T) *Hetzner {
 	t.Helper()
-	handler := f.handler()
-	// Serve in-process rather than on a local port, so it works in restricted sandboxes
-	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		rec := httptest.NewRecorder()
-		rec.Header().Set("Content-Type", "application/json")
-		handler.ServeHTTP(rec, r)
-		return rec.Result(), nil
-	})
 
 	return &Hetzner{
-		client: hcloud.NewClient(
-			hcloud.WithEndpoint("http://hetzner.test"),
-			hcloud.WithHTTPClient(&http.Client{Transport: transport}),
-			hcloud.WithToken("test"),
-			hcloud.WithPollOpts(hcloud.PollOpts{BackoffFunc: hcloud.ConstantBackoff(time.Millisecond)}),
-			hcloud.WithRetryOpts(hcloud.RetryOpts{BackoffFunc: hcloud.ConstantBackoff(time.Millisecond), MaxRetries: 0}),
-		),
+		client:          newTestClient(t, f.handler()),
 		poll:            time.Millisecond,
 		shutdownTimeout: 200 * time.Millisecond,
 		runLocal: func(_ context.Context, name string, _ ...string) error {
@@ -129,26 +135,38 @@ func (f *fakeStopAPI) hetzner(t *testing.T) *Hetzner {
 
 func TestStopShutsDownBeforeDeleting(t *testing.T) {
 	api := &fakeStopAPI{offAfter: 2}
-	assert.NoError(t, api.hetzner(t).StopFromClient(context.Background(), "machine"))
+	assert.NoError(t, api.hetzner(t).StopFromClient(context.Background(), machineName))
 	assert.Equal(t, []string{callShutdown, callDelete}, api.called())
 	assert.Greater(t, api.lookups, 2, "must wait for the server to be off")
 }
 
 func TestStopDeletesWhenShutdownFails(t *testing.T) {
 	api := &fakeStopAPI{shutdownFails: true}
-	assert.NoError(t, api.hetzner(t).StopFromClient(context.Background(), "machine"))
+	assert.NoError(t, api.hetzner(t).StopFromClient(context.Background(), machineName))
 	assert.Equal(t, []string{callShutdown, callDelete}, api.called())
 }
 
 func TestStopDeletesWhenServerNeverPowersOff(t *testing.T) {
 	api := &fakeStopAPI{offAfter: -1}
-	assert.NoError(t, api.hetzner(t).StopFromClient(context.Background(), "machine"))
+	assert.NoError(t, api.hetzner(t).StopFromClient(context.Background(), machineName))
 	assert.Equal(t, []string{callShutdown, callDelete}, api.called())
+}
+
+func TestStopRetriesFailedDeleteAction(t *testing.T) {
+	api := &fakeStopAPI{deleteActionFailures: 1}
+	assert.NoError(t, api.hetzner(t).StopFromMachine(context.Background(), machineName))
+	assert.Equal(t, []string{"local:sh", "local:sync", callDelete, callDelete}, api.called())
+}
+
+func TestStopGivesUpAfterRepeatedDeleteFailures(t *testing.T) {
+	api := &fakeStopAPI{deleteActionFailures: serverDeleteAttempts}
+	assert.Error(t, api.hetzner(t).StopFromMachine(context.Background(), machineName))
+	assert.Len(t, api.called(), 2+serverDeleteAttempts)
 }
 
 func TestStopFromMachineNeverShutsDown(t *testing.T) {
 	api := &fakeStopAPI{}
-	assert.NoError(t, api.hetzner(t).StopFromMachine(context.Background(), "machine"))
+	assert.NoError(t, api.hetzner(t).StopFromMachine(context.Background(), machineName))
 	// containers are stopped, disks synced, then the server is deleted: no ACPI shutdown
 	assert.Equal(t, []string{"local:sh", "local:sync", callDelete}, api.called())
 }
@@ -157,21 +175,6 @@ func TestStopFromMachineDeletesWhenLocalStepsFail(t *testing.T) {
 	api := &fakeStopAPI{}
 	h := api.hetzner(t)
 	h.runLocal = func(context.Context, string, ...string) error { return errors.New("docker is gone") }
-	assert.NoError(t, h.StopFromMachine(context.Background(), "machine"))
+	assert.NoError(t, h.StopFromMachine(context.Background(), machineName))
 	assert.Equal(t, []string{callDelete}, api.called())
 }
-
-// writeAPIError answers like the Hetzner API does for a failed request.
-func writeAPIError(w http.ResponseWriter, status int, code, message string) {
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{keyError: map[string]any{"code": code, "message": message}})
-}
-
-// JSON keys shared by the fake API servers in the tests
-const (
-	keyError  = "error"
-	keyID     = "id"
-	keyName   = "name"
-	keyServer = "server"
-	keyStatus = "status"
-)

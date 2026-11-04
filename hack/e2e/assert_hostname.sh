@@ -16,6 +16,7 @@
 # The machine answers over SSH and is the one created for this run.
 
 set -euo pipefail
+# shellcheck source=lib.sh
 . "$(dirname "$0")/lib.sh"
 
 remote hostname | grep -F -- "${MACHINE_ID}" || fail "hostname does not contain ${MACHINE_ID}"

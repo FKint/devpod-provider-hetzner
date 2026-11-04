@@ -1,7 +1,10 @@
 # DevPod Provider Hetzner
 
-<!-- markdownlint-disable-next-line MD013 MD034 -->
-[![Go Report Card](https://goreportcard.com/badge/github.com/FKint/devpod-provider-hetzner)](https://goreportcard.com/report/github.com/FKint/devpod-provider-hetzner)
+<!-- markdownlint-disable MD013 MD034 -->
+[![Build](https://github.com/FKint/devpod-provider-hetzner/actions/workflows/build.yml/badge.svg)](https://github.com/FKint/devpod-provider-hetzner/actions/workflows/build.yml)
+[![codecov](https://codecov.io/gh/FKint/devpod-provider-hetzner/graph/badge.svg)](https://codecov.io/gh/FKint/devpod-provider-hetzner)
+[![Go version](https://img.shields.io/github/go-mod/go-version/FKint/devpod-provider-hetzner)](go.mod)
+<!-- markdownlint-enable MD013 MD034 -->
 
 DevPod on Hetzner
 
@@ -20,6 +23,7 @@ created by Simon Emms. All credit for the original work goes to the original aut
     - [Recommended devcontainer settings](#recommended-devcontainer-settings)
 - [Development](#development)
   - [Required environment variables](#required-environment-variables)
+  - [Unit tests and coverage](#unit-tests-and-coverage)
   - [Testing independently of DevPod](#testing-independently-of-devpod)
   - [Testing in the DevPod ecosystem](#testing-in-the-devpod-ecosystem)
   - [Releasing](#releasing)
@@ -282,6 +286,24 @@ changed.
 | `MACHINE_TYPE` | Hetzner machine size | `cx33` |
 | `REGION` | Hetzner region ID | `nbg1` |
 | `TOKEN` | **Deprecated**. Replaced by `HCLOUD_TOKEN` | - |
+
+### Unit tests and coverage
+
+```shell
+go test -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out   # per-function summary
+go tool cover -html=coverage.out   # annotated source in the browser
+```
+
+CI runs the same (with `-race -shuffle=on`) and shows the per-function report
+in the job summary of the `test` job. The `coverage` artifact holds
+`coverage.out` and an HTML report.
+
+The tests need no network, no Hetzner account and no open port. The Hetzner
+API and the machine's SSH server are faked in-process (`fakeCloud` and
+`fakeSSHD` in `pkg/hetzner`), so create, rollback and delete are tested with
+the failures injected. Shell scripts under `hack/` are checked with
+[shellcheck](https://www.shellcheck.net/) in CI.
 
 ### Testing independently of DevPod
 

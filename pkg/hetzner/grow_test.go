@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,10 +31,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type transportFunc func(*http.Request) (*http.Response, error)
-
-func (f transportFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-
 // fakeResizeAPI answers volume resize requests in-process (no local port, so it
 // works in restricted sandboxes) and records the requested size.
 type fakeResizeAPI struct {
@@ -45,45 +40,37 @@ type fakeResizeAPI struct {
 	newSize atomic.Int32
 }
 
-func (f *fakeResizeAPI) hetzner() *Hetzner {
-	transport := transportFunc(func(r *http.Request) (*http.Response, error) {
-		rec := httptest.NewRecorder()
-		rec.Header().Set("Content-Type", "application/json")
-		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/volumes/7/actions/resize") {
-			rec.WriteHeader(http.StatusNotFound)
-			return rec.Result(), nil
-		}
-		f.calls.Add(1)
-		if f.fail {
-			writeAPIError(rec, http.StatusForbidden, "limit_reached", "limit reached")
-			return rec.Result(), nil
-		}
-		var body struct {
-			Size int32 `json:"size"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		f.newSize.Store(body.Size)
-		status := "success"
-		if f.pending {
-			status = "running"
-		}
-		_ = json.NewEncoder(rec).Encode(map[string]any{"action": map[string]any{"id": 1, "status": status}})
-		return rec.Result(), nil
-	})
-
-	return &Hetzner{client: hcloud.NewClient(
-		hcloud.WithEndpoint("http://hetzner.test"),
-		hcloud.WithHTTPClient(&http.Client{Transport: transport}),
-		hcloud.WithToken("test"),
-		hcloud.WithRetryOpts(hcloud.RetryOpts{MaxRetries: 0}),
-	)}
+func (f *fakeResizeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/volumes/7/actions/resize") {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	f.calls.Add(1)
+	if f.fail {
+		writeAPIError(w, http.StatusForbidden, "limit_reached", "limit reached")
+		return
+	}
+	var body struct {
+		Size int32 `json:"size"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	f.newSize.Store(body.Size)
+	status := statusSuccess
+	if f.pending {
+		status = statusRunning
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{keyAction: map[string]any{"id": 1, "status": status}})
 }
 
-const machineName = "machine"
+func (f *fakeResizeAPI) hetzner(t *testing.T) *Hetzner {
+	t.Helper()
+
+	return &Hetzner{client: newTestClient(t, f)}
+}
 
 func TestGrowVolume(t *testing.T) {
 	api := &fakeResizeAPI{}
-	assert.NoError(t, api.hetzner().growVolume(context.Background(), &hcloud.Volume{ID: 7, Name: machineName, Size: 30}, 50))
+	assert.NoError(t, api.hetzner(t).growVolume(context.Background(), &hcloud.Volume{ID: 7, Name: machineName, Size: 30}, 50))
 	assert.Equal(t, int32(1), api.calls.Load())
 	assert.Equal(t, int32(50), api.newSize.Load())
 }
@@ -91,7 +78,7 @@ func TestGrowVolume(t *testing.T) {
 func TestGrowVolumeNeverShrinks(t *testing.T) {
 	for _, size := range []int{30, 20, 10} {
 		api := &fakeResizeAPI{}
-		assert.NoError(t, api.hetzner().growVolume(context.Background(), &hcloud.Volume{ID: 7, Name: machineName, Size: 30}, size))
+		assert.NoError(t, api.hetzner(t).growVolume(context.Background(), &hcloud.Volume{ID: 7, Name: machineName, Size: 30}, size))
 		assert.Zero(t, api.calls.Load(), "requested %dGB for a 30GB volume", size)
 	}
 }
@@ -99,14 +86,14 @@ func TestGrowVolumeNeverShrinks(t *testing.T) {
 func TestGrowVolumeRefusedIsNotFatal(t *testing.T) {
 	// The machine still starts with the volume it has
 	api := &fakeResizeAPI{fail: true}
-	assert.NoError(t, api.hetzner().growVolume(context.Background(), &hcloud.Volume{ID: 7, Name: machineName, Size: 30}, 50))
+	assert.NoError(t, api.hetzner(t).growVolume(context.Background(), &hcloud.Volume{ID: 7, Name: machineName, Size: 30}, 50))
 	assert.Equal(t, int32(1), api.calls.Load())
 }
 
 func TestGrowVolumeUnconfirmedIsAnError(t *testing.T) {
 	// The resize was accepted but isn't confirmed: the volume may be locked, so don't attach it
 	api := &fakeResizeAPI{pending: true}
-	err := api.hetzner().growVolume(context.Background(), &hcloud.Volume{ID: 7, Name: machineName, Size: 30}, 50)
+	err := api.hetzner(t).growVolume(context.Background(), &hcloud.Volume{ID: 7, Name: machineName, Size: 30}, 50)
 	assert.ErrorContains(t, err, "growing volume")
 }
 

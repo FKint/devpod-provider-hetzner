@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -29,10 +28,6 @@ import (
 	"github.com/loft-sh/devpod/pkg/client"
 	"github.com/stretchr/testify/assert"
 )
-
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 // fakeAPI serves just the endpoints used to find a volume and the server it is attached to.
 type fakeAPI struct {
@@ -65,7 +60,7 @@ func (f *fakeAPI) handler() http.Handler {
 			return
 		}
 		n -= f.errorsFirst
-		vol := map[string]any{keyID: 7, keyName: "machine", "size": 40, keyServer: nil}
+		vol := map[string]any{keyID: 7, keyName: machineName, "size": 40, keyServer: nil}
 		if f.attachedFor < 0 || n <= f.attachedFor {
 			vol["server"] = 42
 		}
@@ -92,10 +87,10 @@ func (f *fakeAPI) handler() http.Handler {
 			writeAPIError(w, http.StatusNotFound, "not_found", "server not found")
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{keyServer: map[string]any{keyID: 42, keyName: "other", keyStatus: f.server42}})
+		_ = json.NewEncoder(w).Encode(map[string]any{keyServer: map[string]any{keyID: 42, keyName: otherName, keyStatus: f.server42}})
 	})
 	mux.HandleFunc("/servers", func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"servers": []any{}})
+		_ = json.NewEncoder(w).Encode(map[string]any{keyServers: []any{}})
 	})
 
 	return mux
@@ -103,30 +98,13 @@ func (f *fakeAPI) handler() http.Handler {
 
 func (f *fakeAPI) hetzner(t *testing.T) *Hetzner {
 	t.Helper()
-	handler := f.handler()
-	// Serve in-process rather than on a local port, so it works in restricted sandboxes
-	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		rec := httptest.NewRecorder()
-		rec.Header().Set("Content-Type", "application/json")
-		handler.ServeHTTP(rec, r)
-		return rec.Result(), nil
-	})
-
-	return &Hetzner{
-		client: hcloud.NewClient(
-			hcloud.WithEndpoint("http://hetzner.test"),
-			hcloud.WithHTTPClient(&http.Client{Transport: transport}),
-			hcloud.WithToken("test"),
-			hcloud.WithRetryOpts(hcloud.RetryOpts{BackoffFunc: hcloud.ConstantBackoff(time.Millisecond), MaxRetries: 0}),
-		),
-		poll: time.Millisecond,
-	}
+	return &Hetzner{client: newTestClient(t, f.handler()), poll: time.Millisecond}
 }
 
 func TestWaitForVolumeDetached(t *testing.T) {
 	// The server delete is done but the volume still points at it for a couple of lookups
 	api := &fakeAPI{attachedFor: 3}
-	vol, err := api.hetzner(t).waitForVolumeDetached(context.Background(), "machine")
+	vol, err := api.hetzner(t).waitForVolumeDetached(context.Background(), machineName)
 	assert.NoError(t, err)
 	if assert.NotNil(t, vol) {
 		assert.Nil(t, vol.Server)
@@ -136,7 +114,7 @@ func TestWaitForVolumeDetached(t *testing.T) {
 
 func TestWaitForVolumeDetachedAlreadyFree(t *testing.T) {
 	api := &fakeAPI{}
-	vol, err := api.hetzner(t).waitForVolumeDetached(context.Background(), "machine")
+	vol, err := api.hetzner(t).waitForVolumeDetached(context.Background(), machineName)
 	assert.NoError(t, err)
 	assert.NotNil(t, vol)
 	assert.Equal(t, int32(1), api.volumeCalls.Load())
@@ -145,7 +123,7 @@ func TestWaitForVolumeDetachedAlreadyFree(t *testing.T) {
 
 func TestWaitForVolumeDetachedWhileServerIsDeleting(t *testing.T) {
 	api := &fakeAPI{attachedFor: 2, server42: string(hcloud.ServerStatusDeleting)}
-	vol, err := api.hetzner(t).waitForVolumeDetached(context.Background(), "machine")
+	vol, err := api.hetzner(t).waitForVolumeDetached(context.Background(), machineName)
 	assert.NoError(t, err)
 	assert.NotNil(t, vol)
 }
@@ -153,9 +131,9 @@ func TestWaitForVolumeDetachedWhileServerIsDeleting(t *testing.T) {
 func TestWaitForVolumeDetachedLiveServer(t *testing.T) {
 	// Attached to a running server: waiting would not help, so fail right away
 	api := &fakeAPI{attachedFor: -1, server42: string(hcloud.ServerStatusRunning)}
-	_, err := api.hetzner(t).waitForVolumeDetached(context.Background(), "machine")
+	_, err := api.hetzner(t).waitForVolumeDetached(context.Background(), machineName)
 	assert.ErrorIs(t, err, ErrVolumeAttached)
-	assert.ErrorContains(t, err, "other")
+	assert.ErrorContains(t, err, otherName)
 	assert.Equal(t, int32(1), api.volumeCalls.Load())
 }
 
@@ -164,7 +142,7 @@ func TestWaitForVolumeDetachedTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	_, err := api.hetzner(t).waitForVolumeDetached(ctx, "machine")
+	_, err := api.hetzner(t).waitForVolumeDetached(ctx, machineName)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.ErrorContains(t, err, "detach")
 	assert.Greater(t, api.volumeCalls.Load(), int32(1))
@@ -183,7 +161,7 @@ func TestStatusBusyUntilVolumeReleased(t *testing.T) {
 		"volume held by a live server": {&fakeAPI{attachedFor: -1, server42: live}, client.StatusStopped},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got, err := tc.api.hetzner(t).Status(context.Background(), "machine")
+			got, err := tc.api.hetzner(t).Status(context.Background(), machineName)
 			assert.NoError(t, err)
 			assert.Equal(t, tc.want, got)
 		})
@@ -192,21 +170,21 @@ func TestStatusBusyUntilVolumeReleased(t *testing.T) {
 
 func TestWaitForVolumeDetachedRetriesTransientErrors(t *testing.T) {
 	api := &fakeAPI{errorsFirst: 3, attachedFor: 1}
-	vol, err := api.hetzner(t).waitForVolumeDetached(context.Background(), "machine")
+	vol, err := api.hetzner(t).waitForVolumeDetached(context.Background(), machineName)
 	assert.NoError(t, err)
 	assert.NotNil(t, vol)
 }
 
 func TestWaitForVolumeDetachedGivesUpOnPersistentErrors(t *testing.T) {
 	api := &fakeAPI{errorsFirst: 100}
-	_, err := api.hetzner(t).waitForVolumeDetached(context.Background(), "machine")
+	_, err := api.hetzner(t).waitForVolumeDetached(context.Background(), machineName)
 	assert.Error(t, err)
 	assert.Equal(t, int32(detachCheckRetries+1), api.volumeCalls.Load())
 }
 
 func TestWaitForVolumeDetachedDoesNotRetryPermanentErrors(t *testing.T) {
 	api := &fakeAPI{duplicate: true}
-	_, err := api.hetzner(t).waitForVolumeDetached(context.Background(), "machine")
+	_, err := api.hetzner(t).waitForVolumeDetached(context.Background(), machineName)
 	assert.Error(t, err)
 	assert.Equal(t, int32(1), api.volumeCalls.Load())
 }
@@ -215,7 +193,7 @@ func TestDeleteVolumeWaitsForTheDeletedServerToReleaseIt(t *testing.T) {
 	// The server is gone, but the volume points at it for a couple of lookups: it
 	// is locked, so no detach is attempted and the volume is deleted once released.
 	api := &fakeAPI{attachedFor: 3}
-	assert.NoError(t, api.hetzner(t).deleteVolume(context.Background(), "machine"))
+	assert.NoError(t, api.hetzner(t).deleteVolume(context.Background(), machineName))
 	assert.Zero(t, api.detachCalls.Load())
 	assert.Equal(t, int32(1), api.deleteCalls.Load())
 }
@@ -223,7 +201,7 @@ func TestDeleteVolumeWaitsForTheDeletedServerToReleaseIt(t *testing.T) {
 func TestDeleteVolumeDetachesFromLiveServer(t *testing.T) {
 	// A running server holds it: detaching is needed (the fake refuses, so it fails)
 	api := &fakeAPI{attachedFor: -1, server42: string(hcloud.ServerStatusRunning)}
-	err := api.hetzner(t).deleteVolume(context.Background(), "machine")
+	err := api.hetzner(t).deleteVolume(context.Background(), machineName)
 	assert.ErrorContains(t, err, "detach volume")
 	assert.Equal(t, int32(1), api.detachCalls.Load())
 	assert.Zero(t, api.deleteCalls.Load())
@@ -232,13 +210,13 @@ func TestDeleteVolumeDetachesFromLiveServer(t *testing.T) {
 func TestDeleteVolumeRetriesTransientErrorsWhileWaiting(t *testing.T) {
 	// Two lookups fail while waiting for the release; the delete still goes through
 	api := &fakeAPI{attachedFor: 4, errorsAfterFirst: 2}
-	assert.NoError(t, api.hetzner(t).deleteVolume(context.Background(), "machine"))
+	assert.NoError(t, api.hetzner(t).deleteVolume(context.Background(), machineName))
 	assert.Equal(t, int32(1), api.deleteCalls.Load())
 }
 
 func TestDeleteVolumeGivesUpOnPersistentErrorsWhileWaiting(t *testing.T) {
 	api := &fakeAPI{attachedFor: -1, errorsAfterFirst: 100}
-	err := api.hetzner(t).deleteVolume(context.Background(), "machine")
+	err := api.hetzner(t).deleteVolume(context.Background(), machineName)
 	assert.Error(t, err)
 	assert.Zero(t, api.deleteCalls.Load(), "a volume that may still be attached is not deleted")
 	assert.Equal(t, int32(detachCheckRetries+2), api.volumeCalls.Load())
@@ -246,6 +224,6 @@ func TestDeleteVolumeGivesUpOnPersistentErrorsWhileWaiting(t *testing.T) {
 
 func TestDeleteVolumeDeletesAFreeVolume(t *testing.T) {
 	api := &fakeAPI{}
-	assert.NoError(t, api.hetzner(t).deleteVolume(context.Background(), "machine"))
+	assert.NoError(t, api.hetzner(t).deleteVolume(context.Background(), machineName))
 	assert.Equal(t, int32(1), api.deleteCalls.Load())
 }

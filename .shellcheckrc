@@ -1,0 +1,3 @@
+# Lets shellcheck follow "source" directives relative to each script (hack/e2e/lib.sh)
+external-sources=true
+source-path=SCRIPTDIR

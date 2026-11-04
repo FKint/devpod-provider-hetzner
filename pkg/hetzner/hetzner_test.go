@@ -55,7 +55,7 @@ func TestFingerPrintGenerate(t *testing.T) {
 			Fingerprint: "d4:dd:bf:79:27:15:d2:36:d1:13:60:79:6a:86:d8:7a",
 		},
 		{
-			Name:      "error",
+			Name:      statusError,
 			PublicKey: "some invalid key",
 			Error:     errors.New("ssh: no key found"),
 		},
@@ -95,8 +95,8 @@ func TestCloudInitStatus(t *testing.T) {
 		assert.Equal(t, wantDone, isCloudInitDone(status.Status), out)
 	}
 
-	assert.True(t, isCloudInitFailed("error"))
-	assert.False(t, isCloudInitFailed("running"))
+	assert.True(t, isCloudInitFailed(statusError))
+	assert.False(t, isCloudInitFailed(statusRunning))
 }
 
 func TestGenerateUserData(t *testing.T) {
@@ -445,4 +445,22 @@ func TestGenerateUserDataNoPackageRefresh(t *testing.T) {
 		assert.Less(t, install, runCmdIndex(cmds, "ufw allow ssh"))
 		assert.Less(t, install, runCmdIndex(cmds, "get.docker.com"))
 	}
+}
+
+func TestIsVolumeAttachFailure(t *testing.T) {
+	failed := func(command string) error {
+		return (&hcloud.Action{
+			Status:       hcloud.ActionStatusError,
+			Command:      command,
+			ErrorCode:    codeUnknownError,
+			ErrorMessage: "volume attach failed",
+		}).Error()
+	}
+
+	assert.True(t, isVolumeAttachFailure(failed("attach_volume")))
+	assert.True(t, isVolumeAttachFailure(fmt.Errorf("wrapped: %w", failed("attach_volume"))))
+	assert.False(t, isVolumeAttachFailure(failed("create_server")))
+	assert.False(t, isVolumeAttachFailure(hcloud.ActionError{Code: codeUnknownError}))
+	assert.False(t, isVolumeAttachFailure(errors.New("attach_volume")))
+	assert.False(t, isVolumeAttachFailure(nil))
 }

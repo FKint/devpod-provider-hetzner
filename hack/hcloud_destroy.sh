@@ -17,7 +17,7 @@
 set -e
 
 echo "Listing volumes"
-volumes=$(hcloud volume list -l machineId=${MACHINE_ID} -o noheader -o columns=id)
+volumes=$(hcloud volume list -l machineId="${MACHINE_ID}" -o noheader -o columns=id)
 
 for i in ${volumes}; do
   echo "Detaching volume ${i} from server"
@@ -27,8 +27,12 @@ for i in ${volumes}; do
   hcloud volume delete "${i}"
 done
 
+# Note the servers' primary IPs before deleting them: auto-created ones carry no
+# labels, so they cannot be found by label once they are orphaned.
 echo "Listing servers"
-servers=$(hcloud server list -l machineId=${MACHINE_ID} -o noheader -o columns=id)
+primary_ips=$(hcloud server list -l machineId="${MACHINE_ID}" -o json | jq -r '
+  .[] | .public_net | [.ipv4.id, .ipv6.id] | .[] | select(. != null)')
+servers=$(hcloud server list -l machineId="${MACHINE_ID}" -o noheader -o columns=id)
 
 for i in ${servers}; do
   echo "Deleting server ${i}"
@@ -36,9 +40,16 @@ for i in ${servers}; do
 done
 
 echo "Listing SSH keys"
-ssh_keys=$(hcloud ssh-key list -l machineId=${MACHINE_ID} -o noheader -o columns=id)
+ssh_keys=$(hcloud ssh-key list -l machineId="${MACHINE_ID}" -o noheader -o columns=id)
 
 for i in ${ssh_keys}; do
   echo "Deleting SSH key ${i}"
   hcloud ssh-key delete "${i}"
+done
+
+# Auto-created primary IPs are normally deleted with their server; remove any
+# that were left behind (ignoring ones already gone).
+for i in ${primary_ips}; do
+  echo "Deleting primary IP ${i}"
+  hcloud primary-ip delete "${i}" 2>/dev/null || true
 done
