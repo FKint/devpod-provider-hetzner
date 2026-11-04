@@ -452,7 +452,7 @@ func TestIsVolumeAttachFailure(t *testing.T) {
 		return (&hcloud.Action{
 			Status:       hcloud.ActionStatusError,
 			Command:      command,
-			ErrorCode:    "unknown_error",
+			ErrorCode:    codeUnknownError,
 			ErrorMessage: "volume attach failed",
 		}).Error()
 	}
@@ -460,7 +460,7 @@ func TestIsVolumeAttachFailure(t *testing.T) {
 	assert.True(t, isVolumeAttachFailure(failed("attach_volume")))
 	assert.True(t, isVolumeAttachFailure(fmt.Errorf("wrapped: %w", failed("attach_volume"))))
 	assert.False(t, isVolumeAttachFailure(failed("create_server")))
-	assert.False(t, isVolumeAttachFailure(hcloud.ActionError{Code: "unknown_error"}))
+	assert.False(t, isVolumeAttachFailure(hcloud.ActionError{Code: codeUnknownError}))
 	assert.False(t, isVolumeAttachFailure(errors.New("attach_volume")))
 	assert.False(t, isVolumeAttachFailure(nil))
 }

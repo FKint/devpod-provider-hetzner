@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -72,7 +73,12 @@ func (h *Hetzner) pollInterval() time.Duration {
 
 func NewHetzner(token string) *Hetzner {
 	return &Hetzner{
-		client: hcloud.NewClient(hcloud.WithToken(token)),
+		client: hcloud.NewClient(
+			hcloud.WithToken(token),
+			// The default client has no timeout, so a hung connection would block forever.
+			// A timeout is retried by the client like any other transient network error.
+			hcloud.WithHTTPClient(&http.Client{Timeout: apiRequestTimeout}),
+		),
 	}
 }
 
@@ -679,8 +685,28 @@ func (h *Hetzner) stop(ctx context.Context, name string, prepare func(context.Co
 	return h.deleteServer(ctx, server)
 }
 
-// deleteServer deletes the server and waits for the deletion to complete.
+// deleteServer deletes the server and waits for the deletion to complete. Hetzner
+// sometimes fails the delete action itself, so it is tried once more: a server that
+// stays behind keeps being billed. A server that is already gone counts as deleted.
 func (h *Hetzner) deleteServer(ctx context.Context, server *hcloud.Server) error {
+	var err error
+	for attempt := 1; attempt <= serverDeleteAttempts; attempt++ {
+		err = h.deleteServerOnce(ctx, server)
+
+		var actionErr hcloud.ActionError
+		if err == nil || hcloud.IsError(err, hcloud.ErrorCodeNotFound) {
+			return nil
+		} else if !errors.As(err, &actionErr) {
+			return err
+		}
+
+		log.Default.Warnf("Deleting server %s failed (attempt %d of %d): %v", server.Name, attempt, serverDeleteAttempts, err)
+	}
+
+	return err
+}
+
+func (h *Hetzner) deleteServerOnce(ctx context.Context, server *hcloud.Server) error {
 	result, _, err := h.client.Server.DeleteWithResult(ctx, server)
 	if err != nil {
 		return err

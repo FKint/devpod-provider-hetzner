@@ -65,9 +65,9 @@ func (f *fakeResizeAPI) hetzner() *Hetzner {
 		f.newSize.Store(body.Size)
 		status := "success"
 		if f.pending {
-			status = "running"
+			status = statusRunning
 		}
-		_ = json.NewEncoder(rec).Encode(map[string]any{"action": map[string]any{"id": 1, "status": status}})
+		_ = json.NewEncoder(rec).Encode(map[string]any{keyAction: map[string]any{"id": 1, "status": status}})
 		return rec.Result(), nil
 	})
 

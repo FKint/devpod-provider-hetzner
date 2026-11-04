@@ -22,6 +22,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -29,6 +30,9 @@ import (
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 	"github.com/stretchr/testify/assert"
 )
+
+// failedActionID is the ID of the action the fake API reports as failed
+const failedActionID = 2
 
 const (
 	callShutdown = "shutdown"
@@ -45,6 +49,9 @@ type fakeStopAPI struct {
 	// negative means it never powers off.
 	offAfter int
 	lookups  int
+	// deleteActionFailures is how many delete actions end in an error before one succeeds
+	deleteActionFailures int
+	deletes              int
 }
 
 func (f *fakeStopAPI) record(s string) {
@@ -63,10 +70,10 @@ func (f *fakeStopAPI) handler() http.Handler {
 	server := func(status string) map[string]any {
 		return map[string]any{keyID: 5, keyName: "machine", keyStatus: status}
 	}
-	action := map[string]any{"action": map[string]any{keyID: 1, keyStatus: "success", "progress": 100}}
+	action := map[string]any{keyAction: map[string]any{keyID: 1, keyStatus: "success", "progress": 100}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/servers", func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"servers": []any{server("running")}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"servers": []any{server(statusRunning)}})
 	})
 	mux.HandleFunc("/servers/5/actions/shutdown", func(w http.ResponseWriter, _ *http.Request) {
 		f.record(callShutdown)
@@ -76,20 +83,35 @@ func (f *fakeStopAPI) handler() http.Handler {
 		}
 		_ = json.NewEncoder(w).Encode(action)
 	})
-	mux.HandleFunc("/actions", func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"actions": []any{action["action"]}})
+	mux.HandleFunc("/actions", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("id") == strconv.Itoa(failedActionID) {
+			failed := map[string]any{
+				keyID: failedActionID, keyStatus: "error", "command": "delete_server",
+				keyError: map[string]any{"code": codeUnknownError, "message": "boom"},
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"actions": []any{failed}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"actions": []any{action[keyAction]}})
 	})
 	mux.HandleFunc("/servers/5", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
 			f.record(callDelete)
-			_ = json.NewEncoder(w).Encode(action)
+			f.mu.Lock()
+			f.deletes++
+			id := 1
+			if f.deletes <= f.deleteActionFailures {
+				id = failedActionID
+			}
+			f.mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{keyAction: map[string]any{keyID: id, keyStatus: statusRunning}})
 			return
 		}
 		f.mu.Lock()
 		f.lookups++
 		off := f.offAfter >= 0 && f.lookups > f.offAfter
 		f.mu.Unlock()
-		status := "running"
+		status := statusRunning
 		if off {
 			status = "off"
 		}
@@ -146,6 +168,18 @@ func TestStopDeletesWhenServerNeverPowersOff(t *testing.T) {
 	assert.Equal(t, []string{callShutdown, callDelete}, api.called())
 }
 
+func TestStopRetriesFailedDeleteAction(t *testing.T) {
+	api := &fakeStopAPI{deleteActionFailures: 1}
+	assert.NoError(t, api.hetzner(t).StopFromMachine(context.Background(), "machine"))
+	assert.Equal(t, []string{"local:sh", "local:sync", callDelete, callDelete}, api.called())
+}
+
+func TestStopGivesUpAfterRepeatedDeleteFailures(t *testing.T) {
+	api := &fakeStopAPI{deleteActionFailures: serverDeleteAttempts}
+	assert.Error(t, api.hetzner(t).StopFromMachine(context.Background(), "machine"))
+	assert.Len(t, api.called(), 2+serverDeleteAttempts)
+}
+
 func TestStopFromMachineNeverShutsDown(t *testing.T) {
 	api := &fakeStopAPI{}
 	assert.NoError(t, api.hetzner(t).StopFromMachine(context.Background(), "machine"))
@@ -174,4 +208,8 @@ const (
 	keyName   = "name"
 	keyServer = "server"
 	keyStatus = "status"
+	keyAction = "action"
+
+	statusRunning    = "running"
+	codeUnknownError = "unknown_error"
 )
