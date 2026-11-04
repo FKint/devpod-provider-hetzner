@@ -637,17 +637,19 @@ func (h *Hetzner) quiesceLocal(ctx context.Context) {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, localStopTimeout)
-	defer cancel()
-
 	// live-restore keeps containers running when dockerd stops, so they have to be
 	// stopped explicitly; docker stop handles several containers concurrently.
 	log.Default.Info("Stopping containers")
 	stopAll := fmt.Sprintf("ids=$(docker ps -q); [ -z \"$ids\" ] || docker stop -t %d $ids", containerStopGrace)
-	if err := run(ctx, "sh", "-c", stopAll); err != nil {
+	stopCtx, cancelStop := context.WithTimeout(ctx, localStopTimeout)
+	defer cancelStop()
+	if err := run(stopCtx, "sh", "-c", stopAll); err != nil {
 		log.Default.Warnf("Could not stop the containers, continuing: %v", err)
 	}
-	if err := run(ctx, "sync"); err != nil {
+	// Its own budget: a slow container stop must not leave sync with an expired context
+	syncCtx, cancelSync := context.WithTimeout(ctx, localStopTimeout)
+	defer cancelSync()
+	if err := run(syncCtx, "sync"); err != nil {
 		log.Default.Warnf("Could not sync the disks, continuing: %v", err)
 	}
 }

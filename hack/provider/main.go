@@ -281,7 +281,7 @@ fi`,
 			Create:  types.StrArray{"${HETZNER_PROVIDER} create"},
 			Delete:  types.StrArray{"${HETZNER_PROVIDER} delete"},
 			Start:   types.StrArray{"${HETZNER_PROVIDER} start"},
-			Stop:    types.StrArray{"${HETZNER_PROVIDER} stop --from-machine"},
+			Stop:    types.StrArray{"${HETZNER_PROVIDER} stop"},
 			Status:  types.StrArray{"${HETZNER_PROVIDER} status"},
 		},
 	}
