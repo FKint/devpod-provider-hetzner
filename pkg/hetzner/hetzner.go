@@ -761,24 +761,11 @@ func (h *Hetzner) deleteVolume(ctx context.Context, name string) error {
 	}
 
 	// Make sure the detach has settled (also covers a server delete that is still releasing it)
-	waitCtx, cancel := context.WithTimeout(ctx, actionTimeout)
-	defer cancel()
-
-	for {
-		volume, err = h.volumeByName(waitCtx, name)
-		if err != nil {
-			return err
-		} else if volume == nil {
-			return nil
-		} else if volume.Server == nil {
-			break
-		}
-
-		select {
-		case <-waitCtx.Done():
-			return fmt.Errorf("waiting for volume to detach: %w", waitCtx.Err())
-		case <-time.After(time.Second):
-		}
+	volume, err = h.waitForVolumeDetached(ctx, name)
+	if err != nil {
+		return err
+	} else if volume == nil {
+		return nil
 	}
 
 	if _, err := h.client.Volume.Delete(ctx, volume); err != nil {
