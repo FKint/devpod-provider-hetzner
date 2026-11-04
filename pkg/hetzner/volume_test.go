@@ -41,6 +41,8 @@ type fakeAPI struct {
 	attachedFor int
 	// errorsFirst is how many volume lookups fail with a server error before they succeed
 	errorsFirst int
+	// duplicate makes the volume lookup return two volumes with the same name
+	duplicate bool
 	// server42 is what GET /servers/42 returns: "" = not found, otherwise its status
 	server42 string
 
@@ -53,7 +55,8 @@ func (f *fakeAPI) handler() http.Handler {
 	mux.HandleFunc("/volumes", func(w http.ResponseWriter, _ *http.Request) {
 		n := int(f.volumeCalls.Add(1))
 		if n <= f.errorsFirst {
-			w.WriteHeader(http.StatusBadGateway)
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":{"code":"server_error","message":"boom"}}`))
 			return
 		}
 		n -= f.errorsFirst
@@ -61,7 +64,11 @@ func (f *fakeAPI) handler() http.Handler {
 		if f.attachedFor < 0 || n <= f.attachedFor {
 			vol["server"] = 42
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"volumes": []any{vol}})
+		vols := []any{vol}
+		if f.duplicate {
+			vols = append(vols, vol)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"volumes": vols})
 	})
 	mux.HandleFunc("/servers/42", func(w http.ResponseWriter, _ *http.Request) {
 		f.serverCalls.Add(1)
@@ -180,4 +187,11 @@ func TestWaitForVolumeDetachedGivesUpOnPersistentErrors(t *testing.T) {
 	_, err := api.hetzner(t).waitForVolumeDetached(context.Background(), "machine")
 	assert.Error(t, err)
 	assert.Equal(t, int32(detachCheckRetries+1), api.volumeCalls.Load())
+}
+
+func TestWaitForVolumeDetachedDoesNotRetryPermanentErrors(t *testing.T) {
+	api := &fakeAPI{duplicate: true}
+	_, err := api.hetzner(t).waitForVolumeDetached(context.Background(), "machine")
+	assert.Error(t, err)
+	assert.Equal(t, int32(1), api.volumeCalls.Load())
 }

@@ -18,7 +18,9 @@ package hetzner
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
@@ -67,7 +69,7 @@ func (h *Hetzner) waitForVolumeDetached(ctx context.Context, name string) (*hclo
 		switch {
 		case err != nil && ctx.Err() != nil:
 			return nil, fmt.Errorf("waiting for volume %s to detach: %w", name, ctx.Err())
-		case err != nil && failures >= detachCheckRetries:
+		case err != nil && (!isTransient(err) || failures >= detachCheckRetries):
 			return nil, err
 		case err != nil:
 			failures++
@@ -90,6 +92,23 @@ func (h *Hetzner) waitForVolumeDetached(ctx context.Context, name string) (*hclo
 		case <-time.After(poll):
 		}
 	}
+}
+
+// isTransient reports whether an API error is worth retrying: network trouble,
+// rate limiting or a server-side hiccup. Anything else (bad token, duplicate
+// volume name, ...) will not fix itself.
+func isTransient(err error) bool {
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+
+	return hcloud.IsError(err,
+		hcloud.ErrorCodeRateLimitExceeded,
+		hcloud.ErrorCodeTimeout,
+		hcloud.ErrorCodeServerError,
+		hcloud.ErrorCodeConflict,
+	)
 }
 
 // volumeAndHolder looks up the volume and, if it is attached, the live server holding it.
