@@ -21,10 +21,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/FKint/devpod-provider-hetzner/pkg/options"
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
@@ -102,24 +104,27 @@ var platforms = []platform{
 }
 
 func main() {
-	if len(os.Args) != 2 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <version>|%s\n", os.Args[0], checkOnlyArg)
+	if err := run(context.Background(), os.Args, os.Stdout); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
-		return
+	}
+}
+
+func run(ctx context.Context, args []string, out io.Writer) error {
+	if len(args) != 2 {
+		return fmt.Errorf("usage: %s <version>|%s", args[0], checkOnlyArg)
 	}
 
 	token := os.Getenv("HCLOUD_TOKEN")
 	if token == "" {
-		fmt.Fprintln(os.Stderr, "Expected HCLOUD_TOKEN environment variable")
-		os.Exit(1)
+		return errors.New("expected HCLOUD_TOKEN environment variable")
 	}
 
-	ctx := context.TODO()
 	h := hcloud.NewClient(hcloud.WithToken(token))
 
 	locations, err := h.Location.All(ctx)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	var regions types.OptionEnumArray
@@ -132,7 +137,7 @@ func main() {
 
 	serverTypes, err := h.ServerType.All(ctx)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	var machineTypes types.OptionEnumArray
@@ -150,28 +155,26 @@ func main() {
 	// A default Hetzner no longer offers would make every default "devpod up" fail,
 	// so refuse to generate a provider.yaml with one
 	if err := checkMachineTypeOffered(defaultMachineType, machineTypes); err != nil {
-		panic(err)
+		return err
 	}
 
 	// Check-only mode needs just the Hetzner API, not the built binaries
-	if os.Args[1] == checkOnlyArg {
-		return
+	if args[1] == checkOnlyArg {
+		return nil
 	}
 
 	checksums := map[string]string{}
 	for _, p := range platforms {
-		checksum, err := File(filepath.Join("dist", p.binaryName()))
+		checksum, err := fileSHA256(filepath.Join("dist", p.binaryName()))
 		if err != nil {
-			panic(fmt.Errorf("generate checksum for %s: %w", p.binaryName(), err))
+			return fmt.Errorf("generate checksum for %s: %w", p.binaryName(), err)
 		}
 
 		checksums[p.binaryName()] = checksum
 	}
 
-	version := fmt.Sprintf("v%s", os.Args[1])
-
 	s, err := yaml.Marshal(BuildConfig(
-		version,
+		fmt.Sprintf("v%s", args[1]),
 		checksums,
 		"nbg1",
 		regions,
@@ -179,10 +182,12 @@ func main() {
 		machineTypes,
 	))
 	if err != nil {
-		panic(err)
+		return err
 	}
 
-	fmt.Print(string(s))
+	_, err = out.Write(s)
+
+	return err
 }
 
 //nolint:funlen // ignore
@@ -381,28 +386,22 @@ fi`,
 
 // checkMachineTypeOffered fails if the default machine type isn't one of the offered ones.
 func checkMachineTypeOffered(def string, offered types.OptionEnumArray) error {
-	for _, o := range offered {
-		if o.Value == def {
-			return nil
-		}
+	if slices.ContainsFunc(offered, func(o types.OptionEnum) bool { return o.Value == def }) {
+		return nil
 	}
 
 	return fmt.Errorf("default MACHINE_TYPE %q is not offered by Hetzner, or is deprecated (%d offered); update defaultMachineType",
 		def, len(offered))
 }
 
-// File hashes a given file to a sha256 string
-func File(filePath string) (string, error) {
-	file, err := os.Open(filePath)
+// fileSHA256 returns the hex sha256 of a file.
+func fileSHA256(filePath string) (string, error) {
+	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = file.Close() }()
 
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", err
-	}
+	sum := sha256.Sum256(data)
 
-	return hex.EncodeToString(hash.Sum(nil)), nil
+	return hex.EncodeToString(sum[:]), nil
 }

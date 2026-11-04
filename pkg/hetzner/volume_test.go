@@ -119,7 +119,7 @@ func (f *fakeAPI) hetzner(t *testing.T) *Hetzner {
 			hcloud.WithToken("test"),
 			hcloud.WithRetryOpts(hcloud.RetryOpts{BackoffFunc: hcloud.ConstantBackoff(time.Millisecond), MaxRetries: 0}),
 		),
-		detachPoll: time.Millisecond,
+		poll: time.Millisecond,
 	}
 }
 

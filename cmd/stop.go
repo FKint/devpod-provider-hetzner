@@ -31,7 +31,11 @@ var stopCmd = &cobra.Command{
 	Short: "Stop an instance",
 	RunE: func(_ *cobra.Command, _ []string) error {
 		return runAndWait(func(h *hetzner.Hetzner, ctx context.Context, name string) error {
-			return h.Stop(ctx, name, fromMachine)
+			if fromMachine {
+				return h.StopFromMachine(ctx, name)
+			}
+
+			return h.StopFromClient(ctx, name)
 		}, client.StatusStopped)
 	},
 }

@@ -45,6 +45,8 @@ import (
 //go:embed cloud-config.yaml
 var cloudConfig embed.FS
 
+var userDataTemplate = template.Must(template.New("cloud-config.yaml").ParseFS(cloudConfig, "cloud-config.yaml"))
+
 type cloudInit struct {
 	Status string `json:"status"`
 }
@@ -53,12 +55,19 @@ type Hetzner struct {
 	client *hcloud.Client
 
 	// Zero values mean the defaults; tests shorten them.
-	shutdownPoll    time.Duration
+	poll            time.Duration
 	shutdownTimeout time.Duration
 	// runLocal runs a command on the machine we are running on (in-VM stop only).
 	runLocal func(ctx context.Context, name string, args ...string) error
-	// detachPoll is how often to check whether a volume was released; statusPoll if zero
-	detachPoll time.Duration
+}
+
+// pollInterval is how often to re-check API state while waiting for it to change.
+func (h *Hetzner) pollInterval() time.Duration {
+	if h.poll > 0 {
+		return h.poll
+	}
+
+	return statusPoll
 }
 
 func NewHetzner(token string) *Hetzner {
@@ -87,10 +96,7 @@ func (h *Hetzner) upsertPublicKey(ctx context.Context, publicKey, machineID stri
 		uploadedSSHKey, _, err := h.client.SSHKey.Create(ctx, hcloud.SSHKeyCreateOpts{
 			Name:      name,
 			PublicKey: publicKey,
-			Labels: map[string]string{
-				"type":         "devpod",
-				labelMachineID: machineID,
-			},
+			Labels:    machineLabels(machineID),
 		})
 		if err != nil {
 			return nil, err
@@ -167,10 +173,7 @@ func (h *Hetzner) BuildServerOptions(
 		Location:   location,
 		ServerType: serverType,
 		Image:      image,
-		Labels: map[string]string{
-			"type":         "devpod",
-			labelMachineID: opts.MachineID,
-		},
+		Labels:     machineLabels(opts.MachineID),
 		SSHKeys: []*hcloud.SSHKey{
 			sshKey,
 		},
@@ -245,7 +248,7 @@ func (h *Hetzner) Create(
 		volume = result.Volume
 		createdVolume = volume
 
-		if err := h.waitForActions(ctx, append([]*hcloud.Action{result.Action}, result.NextActions...)...); err != nil {
+		if err := h.waitForActions(ctx, result.Action, result.NextActions...); err != nil {
 			log.Default.Errorf("Error in volume creation action: %s", err)
 			return err
 		}
@@ -283,7 +286,7 @@ func (h *Hetzner) Create(
 
 	log.Default.Info("Server creation triggered")
 
-	if err := h.waitForActions(ctx, append([]*hcloud.Action{server.Action}, server.NextActions...)...); err != nil {
+	if err := h.waitForActions(ctx, server.Action, server.NextActions...); err != nil {
 		log.Default.Errorf("Error in server creation action: %s", err)
 		return err
 	}
@@ -349,11 +352,7 @@ func (h *Hetzner) rollback(ctx context.Context, name string, server *hcloud.Serv
 	if server != nil {
 		log.Default.Warnf("Rolling back: deleting server %s", server.Name)
 
-		result, _, err := h.client.Server.DeleteWithResult(ctx, server)
-		if err == nil {
-			err = h.waitForActions(ctx, result.Action)
-		}
-		if err != nil {
+		if err := h.deleteServer(ctx, server); err != nil {
 			log.Default.Errorf("Unable to delete server %s, please remove it manually: %v", server.Name, err)
 			// The volume can't be removed while attached to the server
 			return
@@ -378,11 +377,9 @@ func (h *Hetzner) rollback(ctx context.Context, name string, server *hcloud.Serv
 // With failOnAuth, repeated authentication refusals are treated as an error: the server
 // is up but doesn't accept this machine's key (e.g. the key pair was regenerated).
 func waitForProvisioned(ctx context.Context, server *hcloud.Server, privateKeyFile []byte, failOnAuth bool) error {
-	ctx, cancel := context.WithTimeout(ctx, provisionTimeout)
-	defer cancel()
-
-	errorCount, authCount := 0, 0
-	for attempt := 1; ; attempt++ {
+	errorCount, authCount, attempt := 0, 0, 0
+	err := pollUntil(ctx, provisionTimeout, provisionPoll, func(ctx context.Context) (bool, error) {
+		attempt++
 		log.Default.Debugf("Provisioning check %d", attempt)
 
 		status, err := attemptConnection(ctx, server.PublicNet.IPv4.IP.String(), privateKeyFile)
@@ -390,7 +387,7 @@ func waitForProvisioned(ctx context.Context, server *hcloud.Server, privateKeyFi
 		case errors.Is(err, errSSHAuth):
 			authCount++
 			if failOnAuth && authCount >= authFailureThreshold {
-				return fmt.Errorf("%w: server %s refused this machine's SSH key", ErrProvisioningFailed, server.Name)
+				return false, fmt.Errorf("%w: server %s refused this machine's SSH key", ErrProvisioningFailed, server.Name)
 			}
 		case err != nil:
 			// Not reachable yet, or a transient failure. Only answers from cloud-init
@@ -398,41 +395,31 @@ func waitForProvisioned(ctx context.Context, server *hcloud.Server, privateKeyFi
 			authCount = 0
 		case isCloudInitDone(status.Status):
 			log.Default.Info("Server provisioned")
-			warnIfDiskFull(ctx, server.PublicNet.IPv4.IP.String(), privateKeyFile)
-			return nil
+			return true, nil
 		case isCloudInitFailed(status.Status):
 			authCount = 0
 			// Require the failure to persist so a transient report doesn't destroy a server
 			errorCount++
 			if errorCount >= cloudInitErrorThreshold {
-				return fmt.Errorf("%w: cloud-init status %q", ErrProvisioningFailed, status.Status)
+				return false, fmt.Errorf("%w: cloud-init status %q", ErrProvisioningFailed, status.Status)
 			}
 		default:
 			authCount, errorCount = 0, 0
 			log.Default.Debug("Server not yet provisioned")
 		}
 
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("waiting for server to be provisioned: %w", ctx.Err())
-		case <-time.After(provisionPoll):
-		}
+		return false, nil
+	})
+	if isContextErr(err) {
+		return fmt.Errorf("waiting for server to be provisioned: %w", err)
 	}
+
+	return err
 }
 
 // warnIfDiskFull logs a warning when the volume is nearly full, since a full
 // volume stops Docker and every workspace on the machine at once. Best effort.
-func warnIfDiskFull(ctx context.Context, addr string, privateKeyFile []byte) {
-	ctx, cancel := context.WithTimeout(ctx, sshAttemptTimeout)
-	defer cancel()
-
-	conn, err := newSSHClient(ctx, fmt.Sprintf("%s:%d", addr, SSHPort), privateKeyFile)
-	if err != nil {
-		log.Default.Debugf("Skipping the disk usage check: %v", err)
-		return
-	}
-	defer func() { _ = conn.Close() }()
-
+func warnIfDiskFull(ctx context.Context, conn *cryptoSsh.Client) {
 	// Each line is "<kind> <percent>" (an ext4 volume has a fixed number; xfs reports "-")
 	const home = "/home/" + SSHUsername
 	const cmd = "df -P " + home + " | awk 'NR==2{print \"space\", $5}'; " +
@@ -487,11 +474,7 @@ func (h *Hetzner) Delete(ctx context.Context, name string) error {
 		return err
 	}
 	if server != nil {
-		result, _, err := h.client.Server.DeleteWithResult(ctx, server)
-		if err != nil {
-			return err
-		}
-		if err := h.waitForActions(ctx, result.Action); err != nil {
+		if err := h.deleteServer(ctx, server); err != nil {
 			return err
 		}
 	}
@@ -525,29 +508,32 @@ func (h *Hetzner) deleteSSHKeys(ctx context.Context, name string) error {
 	return nil
 }
 
+// GetByName returns the server with the given name, or nil if there is none.
 func (h *Hetzner) GetByName(ctx context.Context, name string) (*hcloud.Server, error) {
 	servers, _, err := h.client.Server.List(ctx, hcloud.ServerListOpts{Name: name})
 	if err != nil {
 		return nil, err
 	}
 
-	serverLength := len(servers)
-	if serverLength > 1 {
-		return nil, ErrMultipleServersFound(name)
-	}
-	if serverLength == 0 {
-		return nil, nil
-	}
+	return atMostOne(servers, ErrMultipleServersFound(name))
+}
 
-	return servers[0], nil
+// atMostOne returns the only item of a lookup by name, or nil if there is none.
+func atMostOne[T any](items []*T, tooMany error) (*T, error) {
+	switch len(items) {
+	case 0:
+		return nil, nil
+	case 1:
+		return items[0], nil
+	default:
+		return nil, tooMany
+	}
 }
 
 func (h *Hetzner) Init(ctx context.Context) error {
 	_, _, err := h.client.Server.List(ctx, hcloud.ServerListOpts{})
-	if err != nil {
-		return err
-	}
-	return nil
+
+	return err
 }
 
 func (h *Hetzner) Status(ctx context.Context, name string) (client.Status, error) {
@@ -587,48 +573,51 @@ func (h *Hetzner) Status(ctx context.Context, name string) (client.Status, error
 // WaitForStatus polls until the machine reaches the wanted status or the timeout expires.
 // Transient API errors are retried until the deadline.
 func (h *Hetzner) WaitForStatus(ctx context.Context, name string, want client.Status) error {
-	ctx, cancel := context.WithTimeout(ctx, statusTimeout)
-	defer cancel()
-
 	var last client.Status
 	var lastErr error
-	for {
+	err := pollUntil(ctx, statusTimeout, h.pollInterval(), func(ctx context.Context) (bool, error) {
 		status, err := h.Status(ctx, name)
 		switch {
 		case err != nil:
 			lastErr = err
 			log.Default.Warnf("Error retrieving server status, retrying: %v", err)
 		case status == want:
-			return nil
+			return true, nil
 		default:
 			lastErr = nil
 			last = status
 		}
 
-		select {
-		case <-ctx.Done():
-			if lastErr != nil {
-				return fmt.Errorf("waiting for status %q: %w", want, lastErr)
-			}
-			return fmt.Errorf("waiting for status %q (currently %q): %w", want, last, ctx.Err())
-		case <-time.After(statusPoll):
-		}
+		return false, nil
+	})
+	switch {
+	case !isContextErr(err):
+		return err
+	case lastErr != nil:
+		return fmt.Errorf("waiting for status %q: %w", want, lastErr)
+	default:
+		return fmt.Errorf("waiting for status %q (currently %q): %w", want, last, err)
 	}
 }
 
-// Stop stops the machine by deleting its server; the volume keeps the data.
+// StopFromClient stops the machine by deleting its server; the volume keeps the data.
 //
-// Deleting a server is a power cut, so first the workloads are given a chance to
-// write out their state. How depends on where we run:
-//   - from a client (fromMachine false): ask the server to shut down (ACPI) and wait
-//     for it to be off, so systemd stops the containers and flushes the disks;
-//   - on the machine itself (fromMachine true, the inactivity shutdown): an ACPI
-//     shutdown would kill this process before it could delete the server and leave
-//     an "off" server that is still billed. So stop the containers and sync
-//     ourselves, then delete.
-//
-// Neither preparation is fatal: the stop must always end with the server deleted.
-func (h *Hetzner) Stop(ctx context.Context, name string, fromMachine bool) error {
+// Deleting a server is a power cut, so first the server is asked to shut down (ACPI)
+// and waited for to be off, so systemd stops the containers and flushes the disks.
+// That preparation is not fatal: the stop must always end with the server deleted.
+func (h *Hetzner) StopFromClient(ctx context.Context, name string) error {
+	return h.stop(ctx, name, h.shutdownGracefully)
+}
+
+// StopFromMachine is StopFromClient for the machine stopping itself (the inactivity
+// shutdown). An ACPI shutdown would kill this process before it could delete the
+// server and leave an "off" server that is still billed, so the containers are
+// stopped and the disks synced locally instead, and then the server is deleted.
+func (h *Hetzner) StopFromMachine(ctx context.Context, name string) error {
+	return h.stop(ctx, name, func(ctx context.Context, _ *hcloud.Server) { h.quiesceLocal(ctx) })
+}
+
+func (h *Hetzner) stop(ctx context.Context, name string, prepare func(context.Context, *hcloud.Server)) error {
 	server, err := h.GetByName(ctx, name)
 	if err != nil {
 		return err
@@ -637,18 +626,27 @@ func (h *Hetzner) Stop(ctx context.Context, name string, fromMachine bool) error
 		return nil
 	}
 
-	if fromMachine {
-		h.quiesceLocal(ctx)
-	} else {
-		h.shutdownGracefully(ctx, server)
-	}
+	prepare(ctx, server)
 
+	return h.deleteServer(ctx, server)
+}
+
+// deleteServer deletes the server and waits for the deletion to complete.
+func (h *Hetzner) deleteServer(ctx context.Context, server *hcloud.Server) error {
 	result, _, err := h.client.Server.DeleteWithResult(ctx, server)
 	if err != nil {
 		return err
 	}
 
 	return h.waitForActions(ctx, result.Action)
+}
+
+// machineLabels are the labels put on every resource belonging to a machine.
+func machineLabels(machineID string) map[string]string {
+	return map[string]string{
+		"type":         "devpod",
+		labelMachineID: machineID,
+	}
 }
 
 // shutdownGracefully asks the server to power off and waits until it has. It only
@@ -668,30 +666,23 @@ func (h *Hetzner) shutdownGracefully(ctx context.Context, server *hcloud.Server)
 		return
 	}
 
-	timeout, poll := h.shutdownTimeout, h.shutdownPoll
+	timeout := h.shutdownTimeout
 	if timeout == 0 {
 		timeout = shutdownTimeout
 	}
-	if poll == 0 {
-		poll = statusPoll
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	for {
+	err = pollUntil(ctx, timeout, h.pollInterval(), func(ctx context.Context) (bool, error) {
 		current, _, err := h.client.Server.GetByID(ctx, server.ID)
 		switch {
-		case err == nil && (current == nil || current.Status == hcloud.ServerStatusOff):
-			return
-		case err != nil && ctx.Err() == nil:
+		case err == nil:
+			return current == nil || current.Status == hcloud.ServerStatusOff, nil
+		case ctx.Err() == nil:
 			log.Default.Warnf("Error retrieving server status, retrying: %v", err)
 		}
 
-		select {
-		case <-ctx.Done():
-			log.Default.Warnf("Server did not power off within %s, deleting it anyway", timeout)
-			return
-		case <-time.After(poll):
-		}
+		return false, nil
+	})
+	if err != nil {
+		log.Default.Warnf("Server did not power off within %s, deleting it anyway", timeout)
 	}
 }
 
@@ -771,48 +762,33 @@ func (h *Hetzner) deleteVolume(ctx context.Context, name string) error {
 }
 
 func (h *Hetzner) volumeByName(ctx context.Context, name string) (*hcloud.Volume, error) {
-	volumes, _, err := h.client.Volume.List(ctx, hcloud.VolumeListOpts{
-		Name: name,
-	})
+	volumes, _, err := h.client.Volume.List(ctx, hcloud.VolumeListOpts{Name: name})
 	if err != nil {
 		return nil, err
 	}
 
-	volLen := len(volumes)
-	if volLen > 1 {
-		return nil, ErrMultipleVolumesFound(name)
-	}
-	if volLen == 0 {
-		return nil, nil
-	}
-
-	return volumes[0], nil
+	return atMostOne(volumes, ErrMultipleVolumesFound(name))
 }
 
 // attemptConnection returns the cloud-init status, or an error if it couldn't be retrieved
-// (errSSHAuth if the server refused our key).
-func attemptConnection(ctx context.Context, addr string, privateKeyFile []byte) (*cloudInit, error) {
+// (errSSHAuth if the server refused our key). Once cloud-init is done it also
+// checks the disk usage over the same connection.
+func attemptConnection(ctx context.Context, ip string, privateKeyFile []byte) (*cloudInit, error) {
 	log.Default.Debug("Checking server provision status")
-
-	target := fmt.Sprintf("%s:%d", addr, SSHPort)
 
 	// Bound the whole attempt (handshake and command) so a hung sshd can't outlive the provisioning deadline
 	ctx, cancel := context.WithTimeout(ctx, sshAttemptTimeout)
 	defer cancel()
 
-	// ssh.NewSSHClient dials without a timeout or context, so probe the port first.
-	// A server that is still booting (or filtered) then costs seconds, not minutes.
-	conn, err := (&net.Dialer{Timeout: sshDialTimeout}).DialContext(ctx, "tcp", target)
-	if err != nil {
+	// Check the server is provisioned - this runs "ssh user@path cloud-init status"
+	sshClient, err := DialSSH(ctx, ip, privateKeyFile)
+	switch {
+	case errors.Is(err, errUnreachable):
 		log.Default.Debugf("Server not reachable yet: %v", err)
 		return nil, err
-	}
-	_ = conn.Close()
-
-	// Check the server is provisioned - this runs "ssh user@path cloud-init status"
-	sshClient, err := newSSHClient(ctx, target, privateKeyFile)
-	if err != nil {
+	case err != nil:
 		log.Default.Warnf("Unable to connect to server: %v", err)
+		// x/crypto/ssh has no typed error for a refused key, only this message
 		if strings.Contains(err.Error(), "unable to authenticate") {
 			return nil, fmt.Errorf("%w: %w", errSSHAuth, err)
 		}
@@ -836,38 +812,51 @@ func attemptConnection(ctx context.Context, addr string, privateKeyFile []byte) 
 		return nil, err
 	}
 
+	if isCloudInitDone(status.Status) {
+		warnIfDiskFull(ctx, sshClient)
+	}
+
 	return status, nil
 }
 
-// newSSHClient wraps ssh.NewSSHClient, which takes no context or timeout, so a
-// stalled handshake is abandoned when ctx ends instead of blocking forever.
-// The abandoned goroutine (and its socket) lives until the handshake returns or the OS
-// gives up, which is bounded by the one-attempt-per-poll cadence and the provisioning timeout.
-func newSSHClient(ctx context.Context, target string, privateKey []byte) (*cryptoSsh.Client, error) {
-	type result struct {
-		client *cryptoSsh.Client
-		err    error
+// DialSSH connects to the SSH server of the machine at ip. Unlike ssh.NewSSHClient it
+// is bounded: connecting is limited by sshDialTimeout, the whole handshake by
+// sshAttemptTimeout and by ctx, and the connection is closed if ctx ends first.
+// A server that is still booting (or filtered) therefore costs seconds, not minutes.
+// It returns errUnreachable when the TCP connection could not be made.
+func DialSSH(ctx context.Context, ip string, privateKey []byte) (*cryptoSsh.Client, error) {
+	config, err := ssh.ConfigFromKeyBytes(privateKey)
+	if err != nil {
+		return nil, err
+	}
+	config.User = SSHUsername
+
+	ctx, cancel := context.WithTimeout(ctx, sshAttemptTimeout)
+	defer cancel()
+
+	target := net.JoinHostPort(ip, strconv.Itoa(SSHPort))
+	conn, err := (&net.Dialer{Timeout: sshDialTimeout}).DialContext(ctx, "tcp", target)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errUnreachable, err)
 	}
 
-	ch := make(chan result, 1)
-	go func() {
-		c, err := ssh.NewSSHClient(SSHUsername, target, privateKey)
-		ch <- result{c, err}
-	}()
-
-	select {
-	case r := <-ch:
-		return r.client, r.err
-	case <-ctx.Done():
-		// Close the connection if the handshake eventually completes
-		go func() {
-			if r := <-ch; r.client != nil {
-				_ = r.client.Close()
-			}
-		}()
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	c, chans, reqs, err := cryptoSsh.NewClientConn(conn, target, config)
+	if !stop() {
+		// ctx ended during the handshake and the connection was closed under it
+		if err == nil {
+			_ = c.Close()
+		}
 
 		return nil, ctx.Err()
 	}
+	if err != nil {
+		_ = conn.Close()
+
+		return nil, fmt.Errorf("dial to %v failed: %w", target, err)
+	}
+
+	return cryptoSsh.NewClient(c, chans, reqs), nil
 }
 
 func parseCloudInitStatus(out []byte) (*cloudInit, error) {
@@ -898,13 +887,8 @@ type userDataParams struct {
 }
 
 func generateUserData(publicKey string, volumeID int64, machine *options.Machine) (*bytes.Buffer, error) {
-	t, err := template.New("cloud-config.yaml").ParseFS(cloudConfig, "cloud-config.yaml")
-	if err != nil {
-		return nil, err
-	}
-
 	buf := new(bytes.Buffer)
-	if err := t.Execute(buf, userDataParams{
+	if err := userDataTemplate.Execute(buf, userDataParams{
 		PublicKey: strings.TrimSuffix(publicKey, "\n"),
 		VolumeID:  strconv.FormatInt(volumeID, 10),
 		Username:  SSHUsername,
@@ -917,9 +901,9 @@ func generateUserData(publicKey string, volumeID int64, machine *options.Machine
 }
 
 // waitForActions blocks until all actions succeed, one fails, or the timeout/context expires.
-func (h *Hetzner) waitForActions(ctx context.Context, actions ...*hcloud.Action) error {
+func (h *Hetzner) waitForActions(ctx context.Context, first *hcloud.Action, next ...*hcloud.Action) error {
 	ctx, cancel := context.WithTimeout(ctx, actionTimeout)
 	defer cancel()
 
-	return h.client.Action.WaitFor(ctx, actions...)
+	return h.client.Action.WaitFor(ctx, append([]*hcloud.Action{first}, next...)...)
 }

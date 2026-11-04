@@ -32,12 +32,12 @@ var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Retrieve the status of an instance",
 	RunE: func(_ *cobra.Command, args []string) error {
-		options, err := options.FromEnv(false)
+		opts, err := options.FromEnv(false)
 		if err != nil {
 			return err
 		}
 
-		status, err := hetzner.NewHetzner(options.Token).Status(context.Background(), options.MachineID)
+		status, err := hetzner.NewHetzner(opts.Token).Status(context.Background(), opts.MachineID)
 		if err != nil {
 			return err
 		}
