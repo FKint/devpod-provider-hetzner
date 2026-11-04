@@ -65,13 +65,13 @@ func (h *Hetzner) waitForVolumeDetached(ctx context.Context, name string) (*hclo
 	for {
 		volume, live, err := h.volumeAndHolder(ctx, name)
 		switch {
-		case err != nil && ctx.Err() == nil && failures < detachCheckRetries:
-			failures++
-			log.Default.Warnf("Error checking volume %s, retrying: %v", name, err)
 		case err != nil && ctx.Err() != nil:
 			return nil, fmt.Errorf("waiting for volume %s to detach: %w", name, ctx.Err())
-		case err != nil:
+		case err != nil && failures >= detachCheckRetries:
 			return nil, err
+		case err != nil:
+			failures++
+			log.Default.Warnf("Error checking volume %s, retrying: %v", name, err)
 		case volume == nil || volume.Server == nil:
 			return volume, nil
 		case live != nil:

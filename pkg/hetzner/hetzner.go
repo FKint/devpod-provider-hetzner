@@ -478,7 +478,7 @@ func (h *Hetzner) Status(ctx context.Context, name string) (client.Status, error
 	}
 	if server == nil {
 		// No server - check the volume
-		volume, err := h.volumeByName(ctx, name)
+		volume, live, err := h.volumeAndHolder(ctx, name)
 		if err != nil {
 			return client.StatusNotFound, err
 		} else if volume == nil {
@@ -487,12 +487,8 @@ func (h *Hetzner) Status(ctx context.Context, name string) (client.Status, error
 
 		// The server delete finishes before its volume is released. Until then the
 		// machine can't be started (the volume would still be attached), so it isn't stopped yet.
-		if volume.Server != nil {
-			if live, err := h.attachedLiveServer(ctx, volume); err != nil {
-				return client.StatusNotFound, err
-			} else if live == nil {
-				return client.StatusBusy, nil
-			}
+		if volume.Server != nil && live == nil {
+			return client.StatusBusy, nil
 		}
 
 		return client.StatusStopped, nil
