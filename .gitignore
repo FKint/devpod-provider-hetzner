@@ -14,3 +14,7 @@ go.work.sum
 .claude/settings.local.json
 .claude/worktrees/
 .claude/.cc-writes/
+
+# Editor settings live in .devcontainer/devcontainer.json; the Claude Code
+# sandbox cannot write .vscode/, which breaks worktree checkouts.
+.vscode/
