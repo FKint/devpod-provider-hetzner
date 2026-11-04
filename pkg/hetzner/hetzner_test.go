@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/FKint/devpod-provider-hetzner/pkg/options"
+	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 	"github.com/stretchr/testify/assert"
 	"sigs.k8s.io/yaml"
 )
@@ -156,6 +157,7 @@ var machineEnvs = []string{
 	options.EnvPersistDocker, options.EnvContainerdImageStore, options.EnvBuildCacheSize,
 	options.EnvPruneImagesAfter, options.EnvPruneAnonymousVolumes, options.EnvSwapSize,
 	options.EnvContainersMemoryHigh, options.EnvContainersMemoryMax, options.EnvContainersSwapMax,
+	options.EnvContainersTasksMax, options.EnvContainersCPUQuota, options.EnvSwappiness,
 }
 
 func renderUserData(t *testing.T, machine *options.Machine) renderedUserData {
@@ -227,6 +229,50 @@ func TestGenerateUserDataOOMProtection(t *testing.T) {
 	// Measured: a throttle zone (MemoryHigh) below MemoryMax let a runaway container hang for minutes
 	assert.Contains(t, slice, "MemoryHigh=infinity\n")
 	assert.Contains(t, slice, "MemorySwapMax=4G\n")
+	assert.Contains(t, slice, "TasksMax=32768\n")
+	// Unset by default: no CPU cap, kernel swappiness
+	assert.NotContains(t, slice, "CPUQuota")
+	assert.NotContains(t, cfg.WriteFiles, "/etc/sysctl.d/90-devpod.conf")
+	for _, c := range cfg.RunCmd {
+		assert.NotContains(t, c, "swappiness")
+	}
+}
+
+func TestGenerateUserDataResourceLimits(t *testing.T) {
+	m := defaultMachine(t)
+	m.ContainersTasksMax = "infinity"
+	m.ContainersCPUQuota = "350%"
+	m.Swappiness = "150"
+	cfg := renderUserData(t, m)
+
+	slice := cfg.WriteFiles["/etc/systemd/system/devpod.slice"]
+	assert.Contains(t, slice, "TasksMax=infinity\n")
+	assert.Contains(t, slice, "CPUQuota=350%\n")
+	assert.Contains(t, cfg.WriteFiles["/etc/sysctl.d/90-devpod.conf"], "vm.swappiness=150\n")
+	assert.GreaterOrEqual(t, runCmdIndex(cfg.RunCmd, "sysctl -w vm.swappiness=150 || true"), 0)
+}
+
+func TestCheckSwapFits(t *testing.T) {
+	m := defaultMachine(t) // 8 GB swap
+	assert.NoError(t, checkSwapFits(&hcloud.ServerType{Name: "cx33", Disk: 80}, m))
+	assert.NoError(t, checkSwapFits(&hcloud.ServerType{Name: "cx23", Disk: 40}, m))
+	assert.NoError(t, checkSwapFits(&hcloud.ServerType{Name: "x", Disk: 12}, m), "exactly fits with the reserve")
+	assert.ErrorIs(t, checkSwapFits(&hcloud.ServerType{Name: "tiny", Disk: 10}, m), ErrSwapTooLarge)
+
+	m.SwapSizeBytes = 0
+	assert.NoError(t, checkSwapFits(&hcloud.ServerType{Name: "tiny", Disk: 10}, m), "no swap always fits")
+	assert.NoError(t, checkSwapFits(nil, m))
+}
+
+func TestDiskUsageWarnings(t *testing.T) {
+	assert.Empty(t, diskUsageWarnings("40%\n1%\n"))
+	assert.Empty(t, diskUsageWarnings("84%\n-\n"), "xfs reports no inode usage")
+	assert.Empty(t, diskUsageWarnings(""))
+	if w := diskUsageWarnings("91%\n3%\n"); assert.Len(t, w, 1) {
+		assert.Contains(t, w[0], "91% full (space)")
+		assert.Contains(t, w[0], "DISK_SIZE")
+	}
+	assert.Len(t, diskUsageWarnings("85%\n99%\n"), 2)
 }
 
 func TestGenerateUserDataDockerOnVolume(t *testing.T) {

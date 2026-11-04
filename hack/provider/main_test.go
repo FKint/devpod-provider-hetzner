@@ -51,6 +51,7 @@ func TestBuildConfigIsValidProvider(t *testing.T) {
 		options.EnvPersistDocker, options.EnvContainerdImageStore, options.EnvBuildCacheSize,
 		options.EnvPruneImagesAfter, options.EnvPruneAnonymousVolumes, options.EnvSwapSize,
 		options.EnvContainersMemoryHigh, options.EnvContainersMemoryMax, options.EnvContainersSwapMax,
+		options.EnvContainersTasksMax, options.EnvContainersCPUQuota, options.EnvSwappiness,
 	}
 	var grouped []string
 	for _, g := range parsed.OptionGroups {
@@ -63,7 +64,10 @@ func TestBuildConfigIsValidProvider(t *testing.T) {
 		}
 		assert.Contains(t, grouped, name)
 		assert.True(t, opt.Local, name)
-		assert.NotEmpty(t, opt.Default, name)
+		// These two are off by default
+		if name != options.EnvContainersCPUQuota && name != options.EnvSwappiness {
+			assert.NotEmpty(t, opt.Default, name)
+		}
 		if opt.ValidationPattern != "" {
 			assert.Regexp(t, regexp.MustCompile(opt.ValidationPattern), opt.Default, name)
 		}

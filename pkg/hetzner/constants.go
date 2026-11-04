@@ -41,4 +41,8 @@ const (
 	// statusTimeout bounds how long the CLI waits for a machine to reach a status.
 	statusTimeout = 5 * time.Minute
 	statusPoll    = time.Second
+	// swapDiskReserveGB is the local disk space kept free of swap for the OS and Docker's runtime files.
+	swapDiskReserveGB = 4
+	// diskWarnPercent is the volume usage from which provisioning warns.
+	diskWarnPercent = 85
 )

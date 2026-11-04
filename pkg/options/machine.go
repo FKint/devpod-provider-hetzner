@@ -38,6 +38,9 @@ const (
 	EnvContainersMemoryHigh  = "CONTAINERS_MEMORY_HIGH"
 	EnvContainersMemoryMax   = "CONTAINERS_MEMORY_MAX"
 	EnvContainersSwapMax     = "CONTAINERS_SWAP_MAX"
+	EnvContainersTasksMax    = "CONTAINERS_TASKS_MAX"
+	EnvContainersCPUQuota    = "CONTAINERS_CPU_QUOTA"
+	EnvSwappiness            = "SWAPPINESS"
 )
 
 // Defaults for the machine options, shared with the generated provider.yaml.
@@ -57,6 +60,11 @@ const (
 	// MemoryMax (and get OOM-killed) within seconds. A size, not a percentage:
 	// systemd documents percentages of RAM for MemoryMax, not for MemorySwapMax.
 	DefaultContainersSwapMax = "4G"
+	// Generous for parallel builds, but stops a fork bomb before the PID table fills.
+	DefaultContainersTasksMax = "32768"
+	// DefaultContainersCPUQuota and DefaultSwappiness are empty: no CPU cap, kernel default.
+	DefaultContainersCPUQuota = ""
+	DefaultSwappiness         = ""
 )
 
 // PruneNever disables the image prune at start.
@@ -77,6 +85,12 @@ const (
 	PatternSystemdSize = `^(\d+[KMGT]|infinity)$`
 	PatternPruneAge    = `^((?i)never|(\d+(\.\d+)?[hms])+)$`
 	PatternWholeNumber = `^\d+$`
+	// A process limit, or infinity
+	PatternTasksMax = `^(\d+|infinity)$`
+	// Empty (no cap) or a percentage of one CPU: 350% is 3.5 CPUs
+	PatternCPUQuota = `^(\d+%)?$`
+	// Empty (kernel default, 60) or 0-200
+	PatternSwappiness = `^(\d{1,3})?$`
 )
 
 var (
@@ -84,6 +98,9 @@ var (
 	systemdMemoryRe = regexp.MustCompile(PatternSystemdMemory)
 	systemdSizeRe   = regexp.MustCompile(PatternSystemdSize)
 	pruneAgeRe      = regexp.MustCompile(PatternPruneAge)
+	tasksMaxRe      = regexp.MustCompile(PatternTasksMax)
+	cpuQuotaRe      = regexp.MustCompile(PatternCPUQuota)
+	swappinessRe    = regexp.MustCompile(PatternSwappiness)
 )
 
 // Machine is the validated machine-level configuration used to render the
@@ -110,6 +127,13 @@ type Machine struct {
 	ContainersMemoryHigh string
 	ContainersMemoryMax  string
 	ContainersSwapMax    string
+	// ContainersTasksMax caps the processes and threads of all containers together.
+	ContainersTasksMax string
+	// ContainersCPUQuota caps the CPU time of all containers together, as a
+	// percentage of one CPU. Empty means no cap.
+	ContainersCPUQuota string
+	// Swappiness is vm.swappiness. Empty leaves the kernel default.
+	Swappiness string
 }
 
 // envParser reads options from the environment and collects every problem.
@@ -163,6 +187,42 @@ func (p *envParser) limit(name, def string, re *regexp.Regexp, want string) stri
 	return v
 }
 
+// tasksMax reads CONTAINERS_TASKS_MAX.
+func (p *envParser) tasksMax() string {
+	v, ok := p.pattern(EnvContainersTasksMax, DefaultContainersTasksMax, tasksMaxRe, "want a number or infinity")
+	if ok && v != "infinity" {
+		if n, err := strconv.ParseUint(v, 10, 32); err != nil || n == 0 {
+			p.fail(EnvContainersTasksMax, v, "must be between 1 and 4294967295 (use infinity for no limit)")
+		}
+	}
+
+	return v
+}
+
+// cpuQuota reads CONTAINERS_CPU_QUOTA; empty means no cap.
+func (p *envParser) cpuQuota() string {
+	v, ok := p.pattern(EnvContainersCPUQuota, DefaultContainersCPUQuota, cpuQuotaRe, "want a percentage of one CPU such as 350%")
+	if ok && v != "" {
+		if n, err := strconv.ParseUint(strings.TrimSuffix(v, "%"), 10, 32); err != nil || n == 0 {
+			p.fail(EnvContainersCPUQuota, v, "must be above 0%")
+		}
+	}
+
+	return v
+}
+
+// swappiness reads SWAPPINESS; empty means the kernel default.
+func (p *envParser) swappiness() string {
+	v, ok := p.pattern(EnvSwappiness, DefaultSwappiness, swappinessRe, "want a number between 0 and 200")
+	if ok && v != "" {
+		if n, _ := strconv.Atoi(v); n > 200 {
+			p.fail(EnvSwappiness, v, "want a number between 0 and 200")
+		}
+	}
+
+	return v
+}
+
 // pruneAge reads PRUNE_IMAGES_AFTER; "never" becomes "".
 func (p *envParser) pruneAge() string {
 	v, ok := p.pattern(EnvPruneImagesAfter, DefaultPruneImagesAfter, pruneAgeRe, "want a duration such as 168h, or never")
@@ -205,6 +265,9 @@ func MachineFromEnv() (Machine, error) {
 		ContainersMemoryHigh:  p.limit(EnvContainersMemoryHigh, DefaultContainersMemoryHigh, systemdMemoryRe, ramLimit),
 		ContainersMemoryMax:   p.limit(EnvContainersMemoryMax, DefaultContainersMemoryMax, systemdMemoryRe, ramLimit),
 		ContainersSwapMax:     p.limit(EnvContainersSwapMax, DefaultContainersSwapMax, systemdSizeRe, "want a size (4G) or infinity"),
+		ContainersTasksMax:    p.tasksMax(),
+		ContainersCPUQuota:    p.cpuQuota(),
+		Swappiness:            p.swappiness(),
 	}
 	m.BuildCacheSize, _ = p.pattern(EnvBuildCacheSize, DefaultBuildCacheSize, dockerSizeRe, "want a size such as 5GB or 500MB")
 
