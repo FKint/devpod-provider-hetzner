@@ -275,10 +275,50 @@ func (h *Hetzner) Create(
 
 	// Create the server
 	log.Default.Info("Creating a new server")
+
+	if err := h.createServerWithRetry(ctx, req, &createdServer); err != nil {
+		return err
+	}
+
+	log.Default.Info("Server created - provisioning")
+
+	return waitForProvisioned(ctx, createdServer, privateKeyFile, false)
+}
+
+// createServerWithRetry creates the server, once more if attaching its volume fails.
+func (h *Hetzner) createServerWithRetry(ctx context.Context, req *hcloud.ServerCreateOpts, created **hcloud.Server) error {
+	for attempt := 1; ; attempt++ {
+		err := h.createServer(ctx, req, created)
+		if err == nil {
+			return nil
+		}
+		// Hetzner sometimes fails attaching the volume with an unknown_error. The
+		// volume is fine, so retry with a fresh server before giving up.
+		if attempt >= serverCreateAttempts || !isVolumeAttachFailure(err) {
+			return err
+		}
+
+		log.Default.Warnf("Attaching the volume failed (%v), retrying with a new server", err)
+
+		if delErr := h.deleteServer(ctx, *created); delErr != nil {
+			// The caller's rollback tries again; the original error is what it sees
+			log.Default.Errorf("Unable to delete server %s: %v", (*created).Name, delErr)
+
+			return err
+		}
+
+		*created = nil
+	}
+}
+
+// createServer creates a server and waits for the creation actions (including attaching
+// the volumes) to finish. The server is stored in created as soon as the API returns it,
+// even when an error follows, so the caller can remove it.
+func (h *Hetzner) createServer(ctx context.Context, req *hcloud.ServerCreateOpts, created **hcloud.Server) error {
 	server, _, err := h.client.Server.Create(ctx, *req)
 	if server.Server != nil {
 		// Track it even when err is set: the API may have created it before failing
-		createdServer = server.Server
+		*created = server.Server
 	}
 	if err != nil {
 		return err
@@ -291,9 +331,17 @@ func (h *Hetzner) Create(
 		return err
 	}
 
-	log.Default.Info("Server created - provisioning")
+	return nil
+}
 
-	return waitForProvisioned(ctx, server.Server, privateKeyFile, false)
+// isVolumeAttachFailure reports whether err is a failed volume attach action.
+func isVolumeAttachFailure(err error) bool {
+	var actionErr hcloud.ActionError
+	if !errors.As(err, &actionErr) || actionErr.Action() == nil {
+		return false
+	}
+
+	return actionErr.Action().Command == "attach_volume"
 }
 
 // startExisting brings an already existing server to the provisioned state.
