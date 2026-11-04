@@ -103,6 +103,8 @@ const (
 	// "never", or a duration made of h, m and s parts. Only the shape is checked
 	// here: whether it is above zero and fits a time.Duration is up to ParseDuration.
 	PatternPruneAge = `^([Nn][Ee][Vv][Ee][Rr]|(\d+(\.\d+)?[hms])+)$`
+	// A positive whole number of GB, at most five digits (Hetzner volumes top out at 10 TB)
+	PatternDiskSize = `^\s*0*[1-9]\d{0,4}\s*$`
 	// Whole GB from 0 to maxSwapSizeGB
 	PatternSwapSize = `^0*(\d{1,2}|1\d\d|2[0-4]\d|25[0-6])$`
 	// The filesystem of a new volume
@@ -196,12 +198,35 @@ func (p *envParser) pattern(name, def string, re *regexp.Regexp, want string) (s
 	return v, true
 }
 
-// limit reads a systemd limit. The pattern is the whole rule: it already refuses
-// zero (every container would fail on its first allocation) and percentages above 100.
+// limit reads a systemd limit. The pattern refuses zero and percentages above 100,
+// and the parsed number is checked again, so a hole in the pattern can't let a zero
+// limit through (every container would fail on its first allocation).
 func (p *envParser) limit(name, def string, re *regexp.Regexp, want string) string {
-	v, _ := p.pattern(name, def, re, want)
+	v, ok := p.pattern(name, def, re, want)
+	if !ok || v == "infinity" {
+		return v
+	}
+
+	if problem := limitProblem(v, want); problem != "" {
+		p.fail(name, v, problem)
+	}
 
 	return v
+}
+
+// limitProblem double-checks a limit that matched its pattern: why it is unusable, or "".
+func limitProblem(v, want string) string {
+	n, err := strconv.ParseFloat(strings.TrimRight(v, "%KMGT"), 64)
+	switch {
+	case err != nil:
+		return want
+	case n == 0:
+		return "must be above 0 (use infinity for no limit)"
+	case strings.HasSuffix(v, "%") && n > 100:
+		return "a percentage can't exceed 100%"
+	}
+
+	return ""
 }
 
 // tasksMax reads CONTAINERS_TASKS_MAX.

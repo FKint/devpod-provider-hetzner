@@ -131,6 +131,10 @@ func TestMachinePatterns(t *testing.T) {
 			// Zero and overflow are ParseDuration's to refuse, see TestMachineFromEnvInvalid
 			"0h": true,
 		},
+		PatternDiskSize: {
+			"40": true, "007": true, "99999": true,
+			"0": false, "": false, "-5": false, "40GB": false, "4.5": false, "100000": false, "99999999999999999999": false,
+		},
 		PatternSwapSize: {
 			DefaultSwapSize: true, "0": true, "256": true, "007": true, "257": false, "300": false, "1000": false,
 			"8G": false, "-1": false, "": false,
@@ -164,4 +168,34 @@ func TestMachineFromEnvResourceLimits(t *testing.T) {
 	assert.Equal(t, infinity, m.ContainersTasksMax)
 	assert.Equal(t, "350%", m.ContainersCPUQuota)
 	assert.Equal(t, "150", m.Swappiness)
+}
+
+// The patterns already refuse these; the parsed check is the second line of defence
+func TestLimitProblem(t *testing.T) {
+	const want = "want a size"
+	assert.Empty(t, limitProblem("85%", want))
+	assert.Empty(t, limitProblem("100%", want))
+	assert.Empty(t, limitProblem("6G", want))
+	assert.Contains(t, limitProblem("0%", want), "above 0")
+	assert.Contains(t, limitProblem("0G", want), "above 0")
+	assert.Contains(t, limitProblem("101%", want), "exceed 100%")
+	assert.Equal(t, want, limitProblem("abc", want))
+}
+
+// With a pattern that lets everything through, the parsed check alone refuses a bad limit
+func TestLimitRefusesWhatTheParsedCheckRejects(t *testing.T) {
+	const name = "TEST_LIMIT"
+	anything := regexp.MustCompile(`.*`)
+
+	for _, bad := range []string{"0%", "150%"} {
+		t.Setenv(name, bad)
+		var p envParser
+		assert.Equal(t, bad, p.limit(name, "", anything, "want a limit"))
+		assert.Len(t, p.errs, 1, bad)
+	}
+
+	t.Setenv(name, "50%")
+	var p envParser
+	p.limit(name, "", anything, "want a limit")
+	assert.Empty(t, p.errs)
 }

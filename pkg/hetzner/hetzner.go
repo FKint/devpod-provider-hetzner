@@ -175,7 +175,7 @@ func (h *Hetzner) BuildServerOptions(
 		return nil, "", nil, err
 	}
 	if serverType == nil {
-		return nil, "", nil, ErrUnknownMachineID
+		return nil, "", nil, ErrUnknownMachineType
 	}
 
 	image, _, err := h.client.Image.GetByNameAndArchitecture(ctx, opts.DiskImage, serverType.Architecture)
@@ -274,34 +274,10 @@ func (h *Hetzner) Create(
 			return fmt.Errorf("%w: need at least %dGB, got %d", ErrDiskTooSmall, options.MinDiskSizeGB, diskSize)
 		}
 
-		// Create the volume as it doesn't exist
-		log.Default.Info("Creating a new volume")
-
-		result, _, err := h.client.Volume.Create(ctx, hcloud.VolumeCreateOpts{
-			Location:  req.Location,
-			Name:      req.Name,
-			Size:      diskSize,
-			Format:    new(machine.VolumeFormat),
-			Automount: new(false),
-			Labels:    req.Labels,
-		})
+		volume, err = h.createVolume(ctx, req, diskSize, machine, &createdVolume)
 		if err != nil {
-			// The volume may exist although the response got lost (e.g. a request
-			// timeout), and the name was free when we started, so it is ours
-			createdVolume, _ = h.volumeByName(context.WithoutCancel(ctx), req.Name)
-
 			return err
 		}
-
-		volume = result.Volume
-		createdVolume = volume
-
-		if err := h.waitForActions(ctx, result.Action, result.NextActions...); err != nil {
-			log.Default.Errorf("Error in volume creation action: %s", err)
-			return err
-		}
-
-		log.Default.Info("Volume successfully created")
 	} else if err := h.growVolume(ctx, volume, diskSize); err != nil {
 		return err
 	}
@@ -331,6 +307,62 @@ func (h *Hetzner) Create(
 	log.Default.Info("Server created - provisioning")
 
 	return h.waitForProvisioned(ctx, createdServer, privateKeyFile, false)
+}
+
+// createVolume creates the machine's data volume and waits for it. The volume is stored
+// in created as soon as it is known to be ours, even when an error follows, so the
+// caller can remove it.
+func (h *Hetzner) createVolume(
+	ctx context.Context,
+	req *hcloud.ServerCreateOpts,
+	diskSize int,
+	machine *options.Machine,
+	created **hcloud.Volume,
+) (*hcloud.Volume, error) {
+	log.Default.Info("Creating a new volume")
+
+	// Marks this attempt's volume, so a lookup after a lost response can tell it
+	// from one a concurrent run created under the same name
+	attempt := rand.Text()
+	labels := maps.Clone(req.Labels)
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	labels[labelCreateAttempt] = attempt
+
+	result, _, err := h.client.Volume.Create(ctx, hcloud.VolumeCreateOpts{
+		Location:  req.Location,
+		Name:      req.Name,
+		Size:      diskSize,
+		Format:    new(machine.VolumeFormat),
+		Automount: new(false),
+		Labels:    labels,
+	})
+	if err != nil {
+		// The volume may exist although the response got lost (e.g. a request
+		// timeout). It is ours only if it carries this attempt's label.
+		existing, lookupErr := h.volumeByName(context.WithoutCancel(ctx), req.Name)
+		switch {
+		case lookupErr != nil:
+			log.Default.Warnf("Could not check whether volume %s was created, remove it manually if it exists: %v",
+				req.Name, lookupErr)
+		case existing != nil && existing.Labels[labelCreateAttempt] == attempt:
+			*created = existing
+		}
+
+		return nil, err
+	}
+
+	*created = result.Volume
+
+	if err := h.waitForActions(ctx, result.Action, result.NextActions...); err != nil {
+		log.Default.Errorf("Error in volume creation action: %s", err)
+		return nil, err
+	}
+
+	log.Default.Info("Volume successfully created")
+
+	return result.Volume, nil
 }
 
 // createServerWithRetry creates the server, once more if attaching its volume fails.
@@ -387,7 +419,11 @@ func (h *Hetzner) createServer(ctx context.Context, req *hcloud.ServerCreateOpts
 			// The server may exist although the response got lost (e.g. a request
 			// timeout). It is ours only if it carries this attempt's label.
 			existing, lookupErr := h.GetByName(context.WithoutCancel(ctx), req.Name)
-			if lookupErr == nil && existing != nil && existing.Labels[labelCreateAttempt] == attempt {
+			switch {
+			case lookupErr != nil:
+				log.Default.Warnf("Could not check whether server %s was created, remove it manually if it exists: %v",
+					req.Name, lookupErr)
+			case existing != nil && existing.Labels[labelCreateAttempt] == attempt:
 				*created = existing
 			}
 		}
@@ -941,11 +977,13 @@ func attemptConnection(ctx context.Context, ip string, privateKeyFile []byte) (*
 		log.Default.Debugf("Server not reachable yet: %v", err)
 		return nil, err
 	case err != nil:
-		log.Default.Warnf("Unable to connect to server: %v", err)
 		// x/crypto/ssh has no typed error for a refused key, only this message
 		if strings.Contains(err.Error(), "unable to authenticate") {
+			log.Default.Warnf("Unable to connect to server: %v", err)
 			return nil, fmt.Errorf("%w: %w", errSSHAuth, err)
 		}
+		// Expected while sshd is starting (EOF, connection reset)
+		log.Default.Debugf("Unable to connect to server yet: %v", err)
 		return nil, err
 	}
 	defer func() {

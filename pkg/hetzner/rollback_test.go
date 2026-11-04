@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/FKint/devpod-provider-hetzner/pkg/options"
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -131,4 +132,45 @@ func TestGenerateUserDataDropsTheKeyComment(t *testing.T) {
 
 	_, err = generateUserData("not a key", 1, defaultMachine(t))
 	assert.Error(t, err)
+}
+
+// A volume whose create answer got lost is ours, because it carries this attempt's label
+func TestCreateRemovesAVolumeWhoseResponseWasLost(t *testing.T) {
+	cloud := newFakeCloud()
+	cloud.loseResponse(reqCreateVolume)
+	_, key := newFakeSSHD(t)
+
+	assert.Error(t, createMachine(t, cloud, key, 10))
+	assertNothingLeft(t, cloud)
+}
+
+// Create is exported: a request without labels must not panic
+func TestCreateAcceptsARequestWithoutLabels(t *testing.T) {
+	cloud := newFakeCloud()
+	cloud.loseResponse(reqCreateVolume)
+	req := testRequest()
+	req.Labels = nil
+
+	assert.NotPanics(t, func() {
+		assert.Error(t, cloud.hetzner(t).Create(context.Background(), req, 10, &options.Machine{}, testPublicKey, nil))
+	})
+}
+
+// When the lookup after a lost response fails too, the create still fails with its own error
+func TestCreateReportsTheOriginalErrorWhenTheLookupAfterALostResponseFails(t *testing.T) {
+	for _, tt := range []struct{ name, lost, list string }{
+		{"volume", reqCreateVolume, reqListVolumes},
+		{"server", reqCreateServer, reqListServers},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cloud := newFakeCloud()
+			cloud.loseResponse(tt.lost)
+			// The first list belongs to the checks before the create, the second is the lookup
+			cloud.failAfter(tt.list, 1)
+			_, key := newFakeSSHD(t)
+
+			err := createMachine(t, cloud, key, 10)
+			assert.ErrorContains(t, err, tt.lost)
+		})
+	}
 }
