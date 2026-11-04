@@ -24,9 +24,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
+	"time"
 
 	"github.com/FKint/devpod-provider-hetzner/pkg/options"
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
@@ -36,6 +38,9 @@ import (
 )
 
 const (
+	// apiRequestTimeout bounds a single HTTP request to the Hetzner API
+	apiRequestTimeout = 30 * time.Second
+
 	archAMD64 = "amd64"
 	archARM64 = "arm64"
 
@@ -120,7 +125,11 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return errors.New("expected HCLOUD_TOKEN environment variable")
 	}
 
-	h := hcloud.NewClient(hcloud.WithToken(token))
+	h := hcloud.NewClient(
+		hcloud.WithToken(token),
+		// The default client has no timeout, so a hung connection would block the release forever
+		hcloud.WithHTTPClient(&http.Client{Timeout: apiRequestTimeout}),
+	)
 
 	locations, err := h.Location.All(ctx)
 	if err != nil {

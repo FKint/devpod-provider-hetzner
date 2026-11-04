@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -162,6 +163,13 @@ func TestStopGivesUpAfterRepeatedDeleteFailures(t *testing.T) {
 	api := &fakeStopAPI{deleteActionFailures: serverDeleteAttempts}
 	assert.Error(t, api.hetzner(t).StopFromMachine(context.Background(), machineName))
 	assert.Len(t, api.called(), 2+serverDeleteAttempts)
+}
+
+func TestDeleteServerTreatsAServerThatIsAlreadyGoneAsDeleted(t *testing.T) {
+	cloud := newFakeCloud()
+
+	assert.NoError(t, cloud.hetzner(t).deleteServer(context.Background(), &hcloud.Server{ID: 999, Name: "gone"}))
+	assert.Equal(t, 1, cloud.count("DELETE /servers/*"), "nothing to retry")
 }
 
 func TestStopFromMachineNeverShutsDown(t *testing.T) {

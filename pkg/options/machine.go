@@ -95,10 +95,13 @@ const (
 	// A percentage of RAM (at most two decimals, what systemd parses), a size with
 	// a K/M/G/T suffix, or infinity. Bare byte counts are refused: "85" is almost
 	// surely meant as 85%.
-	PatternSystemdMemory = `^(\d+(\.\d{1,2})?%|\d+[KMGT]|infinity)$`
+	// Neither may be zero (every container would fail on its first allocation) and a
+	// percentage can't exceed 100.
+	PatternSystemdMemory = `^((0*(100(\.0{1,2})?|[1-9]\d?(\.\d{1,2})?)|0+\.(\d[1-9]|[1-9]\d?))%|\d*[1-9]\d*[KMGT]|infinity)$`
 	// A size or infinity, for limits that systemd does not scale by RAM
-	PatternSystemdSize = `^(\d+[KMGT]|infinity)$`
-	PatternPruneAge    = `^([Nn][Ee][Vv][Ee][Rr]|(\d+(\.\d+)?[hms])+)$`
+	PatternSystemdSize = `^(\d*[1-9]\d*[KMGT]|infinity)$`
+	// "never", or a duration (h, m, s) with at least one non-zero part
+	PatternPruneAge    = `^([Nn][Ee][Vv][Ee][Rr]|(\d+(\.\d+)?[hms])*(\d*[1-9]\d*(\.\d+)?|\d+\.\d*[1-9]\d*)[hms](\d+(\.\d+)?[hms])*)$`
 	PatternWholeNumber = `^\d+$`
 	// The filesystem of a new volume
 	PatternVolumeFormat = `^(xfs|ext4)$`

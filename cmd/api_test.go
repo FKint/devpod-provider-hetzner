@@ -19,36 +19,21 @@ package cmd
 import (
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/FKint/devpod-provider-hetzner/internal/fakehttp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-
 // useFakeAPI answers the requests of the Hetzner client with handler, in-process. The
 // commands build their own client on http.DefaultTransport, so replacing that is
-// enough: no request leaves the test. Because it is global state, the tests using
-// it must not run in parallel. Only non-retryable statuses (such as 401) should be
-// returned for errors: the client retries 5xx with a real backoff.
+// enough: no request leaves the test.
 func useFakeAPI(t *testing.T, handler http.HandlerFunc) {
 	t.Helper()
-
-	original := http.DefaultTransport
-	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		rec := httptest.NewRecorder()
-		rec.Header().Set("Content-Type", "application/json")
-		handler(rec, r)
-
-		return rec.Result(), nil
-	})
-	t.Cleanup(func() { http.DefaultTransport = original })
+	fakehttp.ReplaceDefaultTransport(t, handler)
 }
 
 const (
@@ -81,16 +66,24 @@ func captureStdout(t *testing.T, f func()) string {
 
 	r, w, err := os.Pipe()
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = r.Close() })
+
+	// Drain concurrently: output beyond the pipe buffer would block f otherwise
+	read := make(chan []byte, 1)
+	go func() {
+		out, _ := io.ReadAll(r)
+		read <- out
+	}()
+
 	original := os.Stdout
 	os.Stdout = w
 	defer func() { os.Stdout = original }()
 
 	f()
+	os.Stdout = original
 	require.NoError(t, w.Close())
-	out, err := io.ReadAll(r)
-	require.NoError(t, err)
 
-	return string(out)
+	return string(<-read)
 }
 
 func TestInitAgainstTheAPI(t *testing.T) {

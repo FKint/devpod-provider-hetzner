@@ -19,10 +19,10 @@ package hetzner
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/FKint/devpod-provider-hetzner/internal/fakehttp"
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 )
 
@@ -52,27 +52,15 @@ const (
 	codeUnknownError = "unknown_error"
 )
 
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-
 // newTestClient returns a Hetzner API client that talks to handler in-process rather
 // than on a local port, so the tests work in restricted sandboxes. Polling and
 // retries are made fast.
 func newTestClient(t *testing.T, handler http.Handler) *hcloud.Client {
 	t.Helper()
 
-	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		rec := httptest.NewRecorder()
-		rec.Header().Set("Content-Type", "application/json")
-		handler.ServeHTTP(rec, r)
-
-		return rec.Result(), nil
-	})
-
 	return hcloud.NewClient(
 		hcloud.WithEndpoint("http://hetzner.test"),
-		hcloud.WithHTTPClient(&http.Client{Transport: transport}),
+		hcloud.WithHTTPClient(&http.Client{Transport: fakehttp.Transport(handler)}),
 		hcloud.WithToken("test"),
 		hcloud.WithPollOpts(hcloud.PollOpts{BackoffFunc: hcloud.ConstantBackoff(time.Millisecond)}),
 		hcloud.WithRetryOpts(hcloud.RetryOpts{BackoffFunc: hcloud.ConstantBackoff(time.Millisecond), MaxRetries: 0}),

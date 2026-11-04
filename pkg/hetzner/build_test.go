@@ -114,12 +114,13 @@ func TestBuildServerOptionsRejectsUnknownNames(t *testing.T) {
 	}
 }
 
-// Region and machine type are checked before the key is uploaded, so a typo in them
-// leaves nothing behind in the account.
-func TestBuildServerOptionsUploadsNoKeyForAnUnknownRegionOrType(t *testing.T) {
+// Region, machine type and image are checked before the key is uploaded, so a typo in
+// them leaves nothing behind in the account.
+func TestBuildServerOptionsUploadsNoKeyForAnUnknownRegionTypeOrImage(t *testing.T) {
 	for _, mutate := range []func(*options.Options){
 		func(o *options.Options) { o.Region = "mars1" },
 		func(o *options.Options) { o.MachineType = "cx999" },
+		func(o *options.Options) { o.DiskImage = "nope" },
 	} {
 		cloud := newFakeCloud()
 		opts := testOptions(t)

@@ -48,6 +48,18 @@ func TestCreateMachineCreatesTheMachineFromTheOptions(t *testing.T) {
 	assert.Len(t, keys, 1, "the key of the machine folder is uploaded")
 }
 
+// The key is uploaded before Create runs, so Create removes it when it refuses early.
+func TestCreateMachineRemovesTheKeyWhenCreateRefusesEarly(t *testing.T) {
+	cloud := newFakeCloud()
+	machine := testMachineOptions(t)
+	machine.SwapSizeBytes = int64(fakeServerDisk) << 30
+
+	err := cloud.hetzner(t).CreateMachine(boundedCtx(t), testOptions(t), 10, machine)
+	assert.ErrorIs(t, err, ErrSwapTooLarge)
+	assert.Equal(t, 1, cloud.count("POST /ssh_keys"), "the key was uploaded first")
+	assertNothingLeft(t, cloud)
+}
+
 func TestCreateMachineStopsAtTheFirstError(t *testing.T) {
 	cloud := newFakeCloud()
 	opts := testOptions(t)

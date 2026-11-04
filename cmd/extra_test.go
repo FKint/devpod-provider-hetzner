@@ -22,6 +22,7 @@ import (
 
 	"github.com/FKint/devpod-provider-hetzner/pkg/hetzner"
 	"github.com/loft-sh/devpod/pkg/client"
+	"github.com/loft-sh/log"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -65,6 +66,9 @@ func TestCommandValidatesBeforeCallingTheAPI(t *testing.T) {
 func TestRootPreRunHandlesLogLevels(t *testing.T) {
 	for _, level := range []string{"", "debug", "not-a-level"} {
 		t.Run("level "+level, func(t *testing.T) {
+			// The command sets the global logger level
+			previous := log.Default.GetLevel()
+			t.Cleanup(func() { log.Default.SetLevel(previous) })
 			t.Setenv("DEVPOD_LOG_LEVEL", level)
 			assert.NoError(t, rootCmd.PersistentPreRunE(rootCmd, nil))
 		})
