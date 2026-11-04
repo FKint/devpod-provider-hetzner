@@ -127,6 +127,12 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # Fails when the provider's default machine type is no longer offered by
+      # Hetzner, so a retired default is caught on the PR rather than at release.
+      # Creates no resources.
+      - name: Default machine type is still offered
+        run: go run ./hack/provider check
+
       - run: go build -o provider .
 
       - name: Create command
