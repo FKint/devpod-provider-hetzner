@@ -181,3 +181,21 @@ func TestLimitProblem(t *testing.T) {
 	assert.Contains(t, limitProblem("101%", want), "exceed 100%")
 	assert.Equal(t, want, limitProblem("abc", want))
 }
+
+// With a pattern that lets everything through, the parsed check alone refuses a bad limit
+func TestLimitRefusesWhatTheParsedCheckRejects(t *testing.T) {
+	const name = "TEST_LIMIT"
+	anything := regexp.MustCompile(`.*`)
+
+	for _, bad := range []string{"0%", "150%"} {
+		t.Setenv(name, bad)
+		var p envParser
+		assert.Equal(t, bad, p.limit(name, "", anything, "want a limit"))
+		assert.Len(t, p.errs, 1, bad)
+	}
+
+	t.Setenv(name, "50%")
+	var p envParser
+	p.limit(name, "", anything, "want a limit")
+	assert.Empty(t, p.errs)
+}
