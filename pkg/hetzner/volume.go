@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"time"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 	"github.com/loft-sh/log"
@@ -55,29 +54,23 @@ const detachCheckRetries = 5
 // belongs to something else, and waiting would not help. A few transient API
 // errors are retried.
 func (h *Hetzner) waitForVolumeDetached(ctx context.Context, name string) (*hcloud.Volume, error) {
-	ctx, cancel := context.WithTimeout(ctx, volumeDetachTimeout)
-	defer cancel()
-
-	poll := h.detachPoll
-	if poll <= 0 {
-		poll = statusPoll
-	}
-
+	var result *hcloud.Volume
 	logged, failures := false, 0
-	for {
+	err := pollUntil(ctx, volumeDetachTimeout, h.pollInterval(), func(ctx context.Context) (bool, error) {
 		volume, live, err := h.volumeAndHolder(ctx, name)
 		switch {
 		case err != nil && ctx.Err() != nil:
-			return nil, fmt.Errorf("waiting for volume %s to detach: %w", name, ctx.Err())
+			return false, ctx.Err()
 		case err != nil && (!isTransient(err) || failures >= detachCheckRetries):
-			return nil, err
+			return false, err
 		case err != nil:
 			failures++
 			log.Default.Warnf("Error checking volume %s, retrying: %v", name, err)
 		case volume == nil || volume.Server == nil:
-			return volume, nil
+			result = volume
+			return true, nil
 		case live != nil:
-			return nil, fmt.Errorf("%w: volume %s is attached to server %s", ErrVolumeAttached, name, live.Name)
+			return false, fmt.Errorf("%w: volume %s is attached to server %s", ErrVolumeAttached, name, live.Name)
 		default:
 			failures = 0
 			if !logged {
@@ -86,12 +79,15 @@ func (h *Hetzner) waitForVolumeDetached(ctx context.Context, name string) (*hclo
 			}
 		}
 
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("waiting for volume %s to detach: %w", name, ctx.Err())
-		case <-time.After(poll):
-		}
+		return false, nil
+	})
+	if isContextErr(err) {
+		return nil, fmt.Errorf("waiting for volume %s to detach: %w", name, err)
+	} else if err != nil {
+		return nil, err
 	}
+
+	return result, nil
 }
 
 // isTransient reports whether an API error is worth retrying: network trouble,

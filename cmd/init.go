@@ -30,12 +30,12 @@ var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialise an instance",
 	RunE: func(_ *cobra.Command, args []string) error {
-		options, err := options.FromEnv(true)
+		opts, err := options.FromEnv(true)
 		if err != nil {
 			return err
 		}
 
-		return hetzner.NewHetzner(options.Token).Init(context.Background())
+		return hetzner.NewHetzner(opts.Token).Init(context.Background())
 	},
 }
 

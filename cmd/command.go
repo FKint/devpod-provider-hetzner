@@ -34,7 +34,7 @@ var commandCmd = &cobra.Command{
 	Use:   "command",
 	Short: "Run a command on the instance",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		options, err := options.FromEnv(false)
+		opts, err := options.FromEnv(false)
 		if err != nil {
 			return err
 		}
@@ -47,13 +47,13 @@ var commandCmd = &cobra.Command{
 		}
 
 		// Get private key
-		privateKey, err := ssh.GetPrivateKeyRawBase(options.MachineFolder)
+		privateKey, err := ssh.GetPrivateKeyRawBase(opts.MachineFolder)
 		if err != nil {
 			return fmt.Errorf("load private key: %w", err)
 		}
 
 		// Create SSH client
-		server, err := hetzner.NewHetzner(options.Token).GetByName(ctx, options.MachineID)
+		server, err := hetzner.NewHetzner(opts.Token).GetByName(ctx, opts.MachineID)
 		if err != nil {
 			return err
 		} else if server == nil {
@@ -61,7 +61,7 @@ var commandCmd = &cobra.Command{
 		}
 
 		// Call external address
-		sshClient, err := ssh.NewSSHClient(hetzner.SSHUsername, fmt.Sprintf("%s:%d", server.PublicNet.IPv4.IP, hetzner.SSHPort), privateKey)
+		sshClient, err := hetzner.DialSSH(ctx, server.PublicNet.IPv4.IP.String(), privateKey)
 		if err != nil {
 			return fmt.Errorf("create ssh client: %w", err)
 		}

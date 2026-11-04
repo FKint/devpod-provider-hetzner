@@ -118,7 +118,7 @@ func (f *fakeStopAPI) hetzner(t *testing.T) *Hetzner {
 			hcloud.WithPollOpts(hcloud.PollOpts{BackoffFunc: hcloud.ConstantBackoff(time.Millisecond)}),
 			hcloud.WithRetryOpts(hcloud.RetryOpts{BackoffFunc: hcloud.ConstantBackoff(time.Millisecond), MaxRetries: 0}),
 		),
-		shutdownPoll:    time.Millisecond,
+		poll:            time.Millisecond,
 		shutdownTimeout: 200 * time.Millisecond,
 		runLocal: func(_ context.Context, name string, _ ...string) error {
 			f.record("local:" + name)
@@ -129,26 +129,26 @@ func (f *fakeStopAPI) hetzner(t *testing.T) *Hetzner {
 
 func TestStopShutsDownBeforeDeleting(t *testing.T) {
 	api := &fakeStopAPI{offAfter: 2}
-	assert.NoError(t, api.hetzner(t).Stop(context.Background(), "machine", false))
+	assert.NoError(t, api.hetzner(t).StopFromClient(context.Background(), "machine"))
 	assert.Equal(t, []string{callShutdown, callDelete}, api.called())
 	assert.Greater(t, api.lookups, 2, "must wait for the server to be off")
 }
 
 func TestStopDeletesWhenShutdownFails(t *testing.T) {
 	api := &fakeStopAPI{shutdownFails: true}
-	assert.NoError(t, api.hetzner(t).Stop(context.Background(), "machine", false))
+	assert.NoError(t, api.hetzner(t).StopFromClient(context.Background(), "machine"))
 	assert.Equal(t, []string{callShutdown, callDelete}, api.called())
 }
 
 func TestStopDeletesWhenServerNeverPowersOff(t *testing.T) {
 	api := &fakeStopAPI{offAfter: -1}
-	assert.NoError(t, api.hetzner(t).Stop(context.Background(), "machine", false))
+	assert.NoError(t, api.hetzner(t).StopFromClient(context.Background(), "machine"))
 	assert.Equal(t, []string{callShutdown, callDelete}, api.called())
 }
 
 func TestStopFromMachineNeverShutsDown(t *testing.T) {
 	api := &fakeStopAPI{}
-	assert.NoError(t, api.hetzner(t).Stop(context.Background(), "machine", true))
+	assert.NoError(t, api.hetzner(t).StopFromMachine(context.Background(), "machine"))
 	// containers are stopped, disks synced, then the server is deleted: no ACPI shutdown
 	assert.Equal(t, []string{"local:sh", "local:sync", callDelete}, api.called())
 }
@@ -157,7 +157,7 @@ func TestStopFromMachineDeletesWhenLocalStepsFail(t *testing.T) {
 	api := &fakeStopAPI{}
 	h := api.hetzner(t)
 	h.runLocal = func(context.Context, string, ...string) error { return errors.New("docker is gone") }
-	assert.NoError(t, h.Stop(context.Background(), "machine", true))
+	assert.NoError(t, h.StopFromMachine(context.Background(), "machine"))
 	assert.Equal(t, []string{callDelete}, api.called())
 }
 

@@ -40,43 +40,34 @@ type Options struct {
 }
 
 func FromEnv(skipMachine bool) (*Options, error) {
-	retOptions := &Options{}
+	o := &Options{}
 
-	var err error
+	required := []struct {
+		name string
+		dest *string
+	}{
+		{"HCLOUD_TOKEN", &o.Token},
+		{"DISK_SIZE", &o.DiskSize},
+		{"DISK_IMAGE", &o.DiskImage},
+		{"MACHINE_TYPE", &o.MachineType},
+		{"REGION", &o.Region},
+	}
 	if !skipMachine {
-		retOptions.MachineID, err = fromEnvOrError("MACHINE_ID")
+		required = append([]struct {
+			name string
+			dest *string
+		}{{"MACHINE_ID", &o.MachineID}, {"MACHINE_FOLDER", &o.MachineFolder}}, required...)
+	}
+
+	for _, r := range required {
+		val, err := fromEnvOrError(r.name)
 		if err != nil {
 			return nil, err
 		}
-
-		retOptions.MachineFolder, err = fromEnvOrError("MACHINE_FOLDER")
-		if err != nil {
-			return nil, err
-		}
+		*r.dest = val
 	}
 
-	retOptions.Token, err = fromEnvOrError("HCLOUD_TOKEN")
-	if err != nil {
-		return nil, err
-	}
-	retOptions.DiskSize, err = fromEnvOrError("DISK_SIZE")
-	if err != nil {
-		return nil, err
-	}
-	retOptions.DiskImage, err = fromEnvOrError("DISK_IMAGE")
-	if err != nil {
-		return nil, err
-	}
-	retOptions.MachineType, err = fromEnvOrError("MACHINE_TYPE")
-	if err != nil {
-		return nil, err
-	}
-	retOptions.Region, err = fromEnvOrError("REGION")
-	if err != nil {
-		return nil, err
-	}
-
-	return retOptions, nil
+	return o, nil
 }
 
 // DiskSizeGB parses the DISK_SIZE option.
