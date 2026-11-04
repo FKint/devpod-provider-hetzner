@@ -19,6 +19,7 @@
 #        persistence.sh after    (machine recreated by the start)
 
 set -euo pipefail
+# shellcheck source=lib.sh
 . "$(dirname "$0")/lib.sh"
 
 # A mirror of the official Docker Hub image, to stay clear of Docker Hub pull limits

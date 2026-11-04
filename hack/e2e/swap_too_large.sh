@@ -17,6 +17,7 @@
 # any server or volume is created. Run before the first `provider create`.
 
 set -euo pipefail
+# shellcheck source=lib.sh
 . "$(dirname "$0")/lib.sh"
 
 # The largest accepted swap (256 GB) is more than the e2e server type's local disk

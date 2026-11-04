@@ -17,13 +17,15 @@
 # sets non-default values for them (SWAP_SIZE=2, CONTAINERS_SWAP_MAX=1G, CONTAINERS_TASKS_MAX=1234, SWAPPINESS=10).
 
 set -euo pipefail
+# shellcheck source=lib.sh
 . "$(dirname "$0")/lib.sh"
 
 # SWAP_SIZE=2 (GB)
 swap="$(remote "swapon --noheadings --bytes --show=SIZE" | tr -d '[:space:]')"
 # swapon reports the usable size, which is one page short of the file size
-[ "${swap}" -le 2147483648 ] && [ "${swap}" -ge 2146435072 ] ||
+if [ "${swap}" -gt 2147483648 ] || [ "${swap}" -lt 2146435072 ]; then
   fail "swap is ${swap} bytes, expected about 2147483648"
+fi
 
 # CONTAINERS_SWAP_MAX=1G
 swap_max="$(remote "systemctl show devpod.slice -p MemorySwapMax --value" | tr -d '[:space:]')"

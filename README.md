@@ -295,8 +295,15 @@ go tool cover -func=coverage.out   # per-function summary
 go tool cover -html=coverage.out   # annotated source in the browser
 ```
 
-CI runs the same and shows the per-function report in the job summary of the
-`test` job. The `coverage` artifact holds `coverage.out` and an HTML report.
+CI runs the same (with `-race -shuffle=on`) and shows the per-function report
+in the job summary of the `test` job. The `coverage` artifact holds
+`coverage.out` and an HTML report.
+
+The tests need no network, no Hetzner account and no open port. The Hetzner
+API and the machine's SSH server are faked in-process (`fakeCloud` and
+`fakeSSHD` in `pkg/hetzner`), so create, rollback and delete are tested with
+the failures injected. Shell scripts under `hack/` are checked with
+[shellcheck](https://www.shellcheck.net/) in CI.
 
 ### Testing independently of DevPod
 

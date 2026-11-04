@@ -55,7 +55,7 @@ func TestFingerPrintGenerate(t *testing.T) {
 			Fingerprint: "d4:dd:bf:79:27:15:d2:36:d1:13:60:79:6a:86:d8:7a",
 		},
 		{
-			Name:      "error",
+			Name:      statusError,
 			PublicKey: "some invalid key",
 			Error:     errors.New("ssh: no key found"),
 		},
@@ -95,8 +95,8 @@ func TestCloudInitStatus(t *testing.T) {
 		assert.Equal(t, wantDone, isCloudInitDone(status.Status), out)
 	}
 
-	assert.True(t, isCloudInitFailed("error"))
-	assert.False(t, isCloudInitFailed("running"))
+	assert.True(t, isCloudInitFailed(statusError))
+	assert.False(t, isCloudInitFailed(statusRunning))
 }
 
 func TestGenerateUserData(t *testing.T) {

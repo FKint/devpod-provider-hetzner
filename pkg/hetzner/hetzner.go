@@ -62,13 +62,19 @@ type Hetzner struct {
 	runLocal func(ctx context.Context, name string, args ...string) error
 }
 
-// pollInterval is how often to re-check API state while waiting for it to change.
-func (h *Hetzner) pollInterval() time.Duration {
+// interval is how often to re-check state while waiting for it to change: def,
+// unless tests shortened it.
+func (h *Hetzner) interval(def time.Duration) time.Duration {
 	if h.poll > 0 {
 		return h.poll
 	}
 
-	return statusPoll
+	return def
+}
+
+// pollInterval is how often to re-check API state while waiting for it to change.
+func (h *Hetzner) pollInterval() time.Duration {
+	return h.interval(statusPoll)
 }
 
 func NewHetzner(token string) *Hetzner {
@@ -292,7 +298,7 @@ func (h *Hetzner) Create(
 
 	log.Default.Info("Server created - provisioning")
 
-	return waitForProvisioned(ctx, createdServer, privateKeyFile, false)
+	return h.waitForProvisioned(ctx, createdServer, privateKeyFile, false)
 }
 
 // createServerWithRetry creates the server, once more if attaching its volume fails.
@@ -388,7 +394,7 @@ func (h *Hetzner) startExisting(ctx context.Context, server *hcloud.Server, priv
 		return fmt.Errorf("%w: server %s is %s, try again shortly", ErrServerBusy, server.Name, server.Status)
 	}
 
-	if err := waitForProvisioned(ctx, server, privateKeyFile, true); err != nil {
+	if err := h.waitForProvisioned(ctx, server, privateKeyFile, true); err != nil {
 		return fmt.Errorf(
 			"%w (the existing server was left in place; if this machine's SSH key was regenerated it can't be reached. "+
 				"Running delete removes the server AND its volume, including any data on it)",
@@ -446,9 +452,14 @@ func (h *Hetzner) rollback(ctx context.Context, name string, server *hcloud.Serv
 // waitForProvisioned polls cloud-init over SSH until it reports success, fails or the timeout expires.
 // With failOnAuth, repeated authentication refusals are treated as an error: the server
 // is up but doesn't accept this machine's key (e.g. the key pair was regenerated).
-func waitForProvisioned(ctx context.Context, server *hcloud.Server, privateKeyFile []byte, failOnAuth bool) error {
+func (h *Hetzner) waitForProvisioned(
+	ctx context.Context,
+	server *hcloud.Server,
+	privateKeyFile []byte,
+	failOnAuth bool,
+) error {
 	errorCount, authCount, attempt := 0, 0, 0
-	err := pollUntil(ctx, provisionTimeout, provisionPoll, func(ctx context.Context) (bool, error) {
+	err := pollUntil(ctx, provisionTimeout, h.interval(provisionPoll), func(ctx context.Context) (bool, error) {
 		attempt++
 		log.Default.Debugf("Provisioning check %d", attempt)
 
@@ -910,6 +921,11 @@ func attemptConnection(ctx context.Context, ip string, privateKeyFile []byte) (*
 	return status, nil
 }
 
+// dialTCP opens the TCP connection of DialSSH. A variable so tests can serve SSH in memory.
+var dialTCP = func(ctx context.Context, target string) (net.Conn, error) {
+	return (&net.Dialer{Timeout: sshDialTimeout}).DialContext(ctx, "tcp", target)
+}
+
 // DialSSH connects to the SSH server of the machine at ip. Unlike ssh.NewSSHClient it
 // is bounded: connecting is limited by sshDialTimeout, the whole handshake by
 // sshAttemptTimeout and by ctx, and the connection is closed if ctx ends first.
@@ -926,7 +942,7 @@ func DialSSH(ctx context.Context, ip string, privateKey []byte) (*cryptoSsh.Clie
 	defer cancel()
 
 	target := net.JoinHostPort(ip, strconv.Itoa(SSHPort))
-	conn, err := (&net.Dialer{Timeout: sshDialTimeout}).DialContext(ctx, "tcp", target)
+	conn, err := dialTCP(ctx, target)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", errUnreachable, err)
 	}

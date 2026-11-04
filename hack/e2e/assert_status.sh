@@ -16,6 +16,7 @@
 # Usage: assert_status.sh <Running|Stopped|NotFound|Busy>
 
 set -euo pipefail
+# shellcheck source=lib.sh
 . "$(dirname "$0")/lib.sh"
 
 assert_status "${1:?expected status}"
