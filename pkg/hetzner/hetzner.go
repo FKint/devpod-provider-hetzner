@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os/exec"
 	"strconv"
 	"strings"
 	"text/template"
@@ -50,6 +51,12 @@ type cloudInit struct {
 
 type Hetzner struct {
 	client *hcloud.Client
+
+	// Zero values mean the defaults; tests shorten them.
+	shutdownPoll    time.Duration
+	shutdownTimeout time.Duration
+	// runLocal runs a command on the machine we are running on (in-VM stop only).
+	runLocal func(ctx context.Context, name string, args ...string) error
 	// detachPoll is how often to check whether a volume was released; statusPoll if zero
 	detachPoll time.Duration
 }
@@ -537,7 +544,19 @@ func (h *Hetzner) WaitForStatus(ctx context.Context, name string, want client.St
 	}
 }
 
-func (h *Hetzner) Stop(ctx context.Context, name string) error {
+// Stop stops the machine by deleting its server; the volume keeps the data.
+//
+// Deleting a server is a power cut, so first the workloads are given a chance to
+// write out their state. How depends on where we run:
+//   - from a client (fromMachine false): ask the server to shut down (ACPI) and wait
+//     for it to be off, so systemd stops the containers and flushes the disks;
+//   - on the machine itself (fromMachine true, the inactivity shutdown): an ACPI
+//     shutdown would kill this process before it could delete the server and leave
+//     an "off" server that is still billed. So stop the containers and sync
+//     ourselves, then delete.
+//
+// Neither preparation is fatal: the stop must always end with the server deleted.
+func (h *Hetzner) Stop(ctx context.Context, name string, fromMachine bool) error {
 	server, err := h.GetByName(ctx, name)
 	if err != nil {
 		return err
@@ -546,12 +565,93 @@ func (h *Hetzner) Stop(ctx context.Context, name string) error {
 		return nil
 	}
 
+	if fromMachine {
+		h.quiesceLocal(ctx)
+	} else {
+		h.shutdownGracefully(ctx, server)
+	}
+
 	result, _, err := h.client.Server.DeleteWithResult(ctx, server)
 	if err != nil {
 		return err
 	}
 
 	return h.waitForActions(ctx, result.Action)
+}
+
+// shutdownGracefully asks the server to power off and waits until it has. It only
+// warns on failure, so the caller can still delete the server.
+func (h *Hetzner) shutdownGracefully(ctx context.Context, server *hcloud.Server) {
+	if server.Status != hcloud.ServerStatusRunning {
+		return
+	}
+
+	log.Default.Infof("Shutting down server %s", server.Name)
+	action, _, err := h.client.Server.Shutdown(ctx, server)
+	if err == nil {
+		err = h.waitForActions(ctx, action)
+	}
+	if err != nil {
+		log.Default.Warnf("Graceful shutdown failed, deleting the server anyway: %v", err)
+		return
+	}
+
+	timeout, poll := h.shutdownTimeout, h.shutdownPoll
+	if timeout == 0 {
+		timeout = shutdownTimeout
+	}
+	if poll == 0 {
+		poll = statusPoll
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	for {
+		current, _, err := h.client.Server.GetByID(ctx, server.ID)
+		switch {
+		case err == nil && (current == nil || current.Status == hcloud.ServerStatusOff):
+			return
+		case err != nil && ctx.Err() == nil:
+			log.Default.Warnf("Error retrieving server status, retrying: %v", err)
+		}
+
+		select {
+		case <-ctx.Done():
+			log.Default.Warnf("Server did not power off within %s, deleting it anyway", timeout)
+			return
+		case <-time.After(poll):
+		}
+	}
+}
+
+// quiesceLocal stops the running containers and flushes the disks of the machine
+// we are running on. It only warns on failure.
+func (h *Hetzner) quiesceLocal(ctx context.Context) {
+	run := h.runLocal
+	if run == nil {
+		run = func(ctx context.Context, name string, args ...string) error {
+			out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+			if err != nil {
+				return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+			}
+			return nil
+		}
+	}
+
+	// live-restore keeps containers running when dockerd stops, so they have to be
+	// stopped explicitly; docker stop handles several containers concurrently.
+	log.Default.Info("Stopping containers")
+	stopAll := fmt.Sprintf("ids=$(docker ps -q); [ -z \"$ids\" ] || docker stop -t %d $ids", containerStopGrace)
+	stopCtx, cancelStop := context.WithTimeout(ctx, localStopTimeout)
+	defer cancelStop()
+	if err := run(stopCtx, "sh", "-c", stopAll); err != nil {
+		log.Default.Warnf("Could not stop the containers, continuing: %v", err)
+	}
+	// Its own budget: a slow container stop must not leave sync with an expired context
+	syncCtx, cancelSync := context.WithTimeout(ctx, localStopTimeout)
+	defer cancelSync()
+	if err := run(syncCtx, "sync"); err != nil {
+		log.Default.Warnf("Could not sync the disks, continuing: %v", err)
+	}
 }
 
 func (h *Hetzner) deleteVolume(ctx context.Context, name string) error {

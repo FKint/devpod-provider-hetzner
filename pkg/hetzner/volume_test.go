@@ -60,7 +60,7 @@ func (f *fakeAPI) handler() http.Handler {
 			return
 		}
 		n -= f.errorsFirst
-		vol := map[string]any{"id": 7, "name": "machine", "size": 40, "server": nil}
+		vol := map[string]any{keyID: 7, keyName: "machine", "size": 40, keyServer: nil}
 		if f.attachedFor < 0 || n <= f.attachedFor {
 			vol["server"] = 42
 		}
@@ -74,10 +74,10 @@ func (f *fakeAPI) handler() http.Handler {
 		f.serverCalls.Add(1)
 		if f.server42 == "" {
 			w.WriteHeader(http.StatusNotFound)
-			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "not_found", "message": "server not found"}})
+			_ = json.NewEncoder(w).Encode(map[string]any{keyError: map[string]any{"code": "not_found", "message": "server not found"}})
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"server": map[string]any{"id": 42, "name": "other", "status": f.server42}})
+		_ = json.NewEncoder(w).Encode(map[string]any{keyServer: map[string]any{keyID: 42, keyName: "other", keyStatus: f.server42}})
 	})
 	mux.HandleFunc("/servers", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"servers": []any{}})

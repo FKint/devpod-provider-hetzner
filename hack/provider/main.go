@@ -271,7 +271,7 @@ fi`,
 			InjectDockerCredentials: "${INJECT_DOCKER_CREDENTIALS}",
 			Binaries:                map[string][]*provider.ProviderBinary{"HETZNER_PROVIDER": binaries("linux")},
 			Exec: provider.ProviderAgentConfigExec{
-				Shutdown: types.StrArray{"${HETZNER_PROVIDER} stop"},
+				Shutdown: types.StrArray{"${HETZNER_PROVIDER} stop --from-machine"},
 			},
 		},
 		Binaries: map[string][]*provider.ProviderBinary{"HETZNER_PROVIDER": binaries("")},
