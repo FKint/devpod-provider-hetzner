@@ -270,7 +270,8 @@ only when all pass does `publish` create the GitHub release with the binaries,
 
 One-time repository setup (Settings → Environments):
 
-- **Hetzner E2E**: secrets `HCLOUD_TOKEN` (read & write) and `SSH_KEY`
+- **Hetzner E2E**: secret `HCLOUD_TOKEN` (read & write); the SSH key pair is
+  generated per run
 - **Release**: secret `HCLOUD_TOKEN` with a **read-only** token, used only to
   generate `provider.yaml`
 
