@@ -33,11 +33,12 @@ volume_gb() {
   hcloud volume list -l "machineId=${MACHINE_ID}" -o noheader -o columns=size | tr -d '[:space:]'
 }
 
-mode="${1:?usage: volume_size.sh before|after <size-gb>}"
-want="${2:?usage: volume_size.sh before|after <size-gb>}"
+usage="usage: volume_size.sh before|after <size-gb>"
+mode="${1:?${usage}}"
+want="${2:?${usage}}"
 
-[ "$(volume_gb)" = "${want}" ] ||
-  fail "volume is $(volume_gb) GB, expected ${want} GB"
+size="$(volume_gb)"
+[ "${size}" = "${want}" ] || fail "volume is ${size} GB, expected ${want} GB"
 
 case "${mode}" in
 before)
@@ -53,6 +54,6 @@ after)
   [ "${after}" -gt "${before}" ] || fail "filesystem did not grow (${before} -> ${after} bytes)"
   ;;
 *)
-  fail "usage: volume_size.sh before|after <size-gb>"
+  fail "${usage}"
   ;;
 esac

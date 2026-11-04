@@ -251,10 +251,8 @@ func (h *Hetzner) Create(
 		}
 
 		log.Default.Info("Volume successfully created")
-	} else {
-		if err := h.growVolume(ctx, volume, diskSize); err != nil {
-			return err
-		}
+	} else if err := h.growVolume(ctx, volume, diskSize); err != nil {
+		return err
 	}
 
 	// Generate the config init
