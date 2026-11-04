@@ -198,10 +198,24 @@ func (p *envParser) pattern(name, def string, re *regexp.Regexp, want string) (s
 	return v, true
 }
 
-// limit reads a systemd limit. The pattern is the whole rule: it already refuses
-// zero (every container would fail on its first allocation) and percentages above 100.
+// limit reads a systemd limit. The pattern refuses zero and percentages above 100,
+// and the parsed number is checked again, so a hole in the pattern can't let a zero
+// limit through (every container would fail on its first allocation).
 func (p *envParser) limit(name, def string, re *regexp.Regexp, want string) string {
-	v, _ := p.pattern(name, def, re, want)
+	v, ok := p.pattern(name, def, re, want)
+	if !ok || v == "infinity" {
+		return v
+	}
+
+	n, err := strconv.ParseFloat(strings.TrimRight(v, "%KMGT"), 64)
+	switch {
+	case err != nil:
+		p.fail(name, v, want)
+	case n == 0:
+		p.fail(name, v, "must be above 0 (use infinity for no limit)")
+	case strings.HasSuffix(v, "%") && n > 100:
+		p.fail(name, v, "a percentage can't exceed 100%")
+	}
 
 	return v
 }
