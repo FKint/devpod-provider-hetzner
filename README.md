@@ -342,6 +342,9 @@ after a squash merge does not repeat the pull request's run, but a pull request
 whose base has moved since its run is tested again. Tag pushes and manual runs
 always run `e2e`.
 
+A run uses a `cx23` server plus a small volume, which costs about €0.02
+(€0.01 per started hour).
+
 One-time repository setup (Settings → Environments):
 
 - **Hetzner E2E**: secret `HCLOUD_TOKEN` (read & write); the SSH key pair is
@@ -383,7 +386,7 @@ To cut a release:
 
 If a tag run fails, fix the cause, delete the tag
 (`git push --delete origin v1.2.3 && git tag -d v1.2.3`) and push it again, or
-use a new version. If e2e fails because Hetzner retired the `cpx22` machine
+use a new version. If e2e fails because Hetzner retired the `cx23` machine
 type, update `MACHINE_TYPE` in the workflow. Check Hetzner for leftover
 `test-*` servers, volumes and SSH keys after any failed e2e run.
 
