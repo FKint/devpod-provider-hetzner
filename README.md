@@ -336,6 +336,12 @@ then runs `commitlint`, `test`, `build` and `e2e` (real Hetzner servers), and
 only when all pass does `publish` create the GitHub release with the binaries,
 `provider.yaml` and a generated changelog.
 
+`e2e` is skipped when it already passed (within 7 days) for exactly the same code,
+identified by the git tree of the checked-out merge result. So the push to `main`
+after a squash merge does not repeat the pull request's run, but a pull request
+whose base has moved since its run is tested again. Tag pushes and manual runs
+always run `e2e`.
+
 One-time repository setup (Settings → Environments):
 
 - **Hetzner E2E**: secret `HCLOUD_TOKEN` (read & write); the SSH key pair is
