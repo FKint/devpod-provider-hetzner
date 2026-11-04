@@ -383,7 +383,7 @@ To cut a release:
 
 If a tag run fails, fix the cause, delete the tag
 (`git push --delete origin v1.2.3 && git tag -d v1.2.3`) and push it again, or
-use a new version. If e2e fails because Hetzner retired the `cpx22` machine
+use a new version. If e2e fails because Hetzner retired the `cx23` machine
 type, update `MACHINE_TYPE` in the workflow. Check Hetzner for leftover
 `test-*` servers, volumes and SSH keys after any failed e2e run.
 

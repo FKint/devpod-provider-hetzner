@@ -136,10 +136,10 @@ jobs:
       MACHINE_ID: test-${{ github.run_id }}
       # The provider generates a throwaway SSH key pair here on first use
       MACHINE_FOLDER: ${{ github.workspace }}/.ssh
-      # The e2e tests deliberately use cpx22, which is not the provider default (cx33).
-      # NOTE: Hetzner retires server types over time; if cpx22 is deprecated or
+      # The e2e tests deliberately use cx23, which is not the provider default (cx33).
+      # NOTE: Hetzner retires server types over time; if cx23 is deprecated or
       # unavailable in REGION, pick a current small type and update this value.
-      MACHINE_TYPE: "cpx22"
+      MACHINE_TYPE: "cx23"
       REGION: "nbg1"
       # Non-default machine options, checked on the server by machine_options.sh
       SWAP_SIZE: "2"
