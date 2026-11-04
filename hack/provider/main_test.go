@@ -58,12 +58,15 @@ func TestBuildConfigIsValidProvider(t *testing.T) {
 		}
 		assert.Contains(t, grouped, name)
 		assert.True(t, opt.Local, name)
-		// These two are off by default
-		if name != options.EnvContainersCPUQuota && name != options.EnvSwappiness {
+		if opt.ValidationPattern == "" {
 			assert.NotEmpty(t, opt.Default, name)
+			continue
 		}
-		if opt.ValidationPattern != "" {
-			assert.Regexp(t, regexp.MustCompile(opt.ValidationPattern), opt.Default, name)
+		re := regexp.MustCompile(opt.ValidationPattern)
+		assert.Regexp(t, re, opt.Default, name)
+		// Only options whose pattern accepts "" (off by default) may default to it
+		if !re.MatchString("") {
+			assert.NotEmpty(t, opt.Default, name)
 		}
 	}
 }

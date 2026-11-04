@@ -99,7 +99,7 @@ const (
 	// Empty (no cap) or a percentage of one CPU: 350% is 3.5 CPUs
 	PatternCPUQuota = `^(\d+%)?$`
 	// Empty (kernel default, 60) or 0-200
-	PatternSwappiness = `^(\d{1,3})?$`
+	PatternSwappiness = `^(200|1\d\d|[1-9]?\d)?$`
 )
 
 var (
@@ -222,12 +222,7 @@ func (p *envParser) cpuQuota() string {
 
 // swappiness reads SWAPPINESS; empty means the kernel default.
 func (p *envParser) swappiness() string {
-	v, ok := p.pattern(EnvSwappiness, DefaultSwappiness, swappinessRe, "want a number between 0 and 200")
-	if ok && v != "" {
-		if n, _ := strconv.Atoi(v); n > 200 {
-			p.fail(EnvSwappiness, v, "want a number between 0 and 200")
-		}
-	}
+	v, _ := p.pattern(EnvSwappiness, DefaultSwappiness, swappinessRe, "want a number between 0 and 200")
 
 	return v
 }

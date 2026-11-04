@@ -209,14 +209,14 @@ func (h *Hetzner) Create(
 		return err
 	}
 
-	// Remove anything created by this call if it doesn't succeed. A volume that
-	// already existed holds the user's data, so it is never removed here. The SSH
-	// key is uploaded before Create, but is re-uploaded on every create/start.
-	var createdServer *hcloud.Server
 	if err := checkSwapFits(req.ServerType, machine); err != nil {
 		return err
 	}
 
+	// Remove anything created by this call if it doesn't succeed. A volume that
+	// already existed holds the user's data, so it is never removed here. The SSH
+	// key is uploaded before Create, but is re-uploaded on every create/start.
+	var createdServer *hcloud.Server
 	var createdVolume *hcloud.Volume
 	defer func() {
 		if err != nil {
@@ -328,8 +328,6 @@ func (h *Hetzner) startExisting(ctx context.Context, server *hcloud.Server, priv
 	return nil
 }
 
-// rollback removes resources created by a failed Create. Failures are logged, not returned,
-// so the original error is what the caller sees.
 // checkSwapFits fails early when the swap file would not fit on the server's
 // local disk, instead of leaving a server that provisions but cannot swap.
 func checkSwapFits(serverType *hcloud.ServerType, machine *options.Machine) error {
@@ -345,6 +343,8 @@ func checkSwapFits(serverType *hcloud.ServerType, machine *options.Machine) erro
 	return nil
 }
 
+// rollback removes resources created by a failed Create. Failures are logged, not returned,
+// so the original error is what the caller sees.
 func (h *Hetzner) rollback(ctx context.Context, name string, server *hcloud.Server, volume *hcloud.Volume) {
 	if server != nil {
 		log.Default.Warnf("Rolling back: deleting server %s", server.Name)
