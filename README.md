@@ -58,8 +58,12 @@ or to fix changes made by DevPod or Hetzner.
 
    This downloads the latest GitHub release. To pin a version use
    `FKint/devpod-provider-hetzner@v1.2.3`. In the DevPod desktop app, use
-   Providers → Add → Custom and enter the same reference. `TOKEN` is also read
-   from the `HETZNER_TOKEN` or `HETZNER_ACCESS_TOKEN` environment variable.
+   Providers → Add → Custom and enter the same reference.
+
+   The DevPod provider option is called `TOKEN`. If you don't set it, DevPod
+   falls back to the `HETZNER_TOKEN` or `HETZNER_ACCESS_TOKEN` environment
+   variable. `HCLOUD_TOKEN` is only what the provider binary reads when you run
+   it directly (see [Development](#development)); it is not a DevPod option.
 
 1. Start a workspace:
 
