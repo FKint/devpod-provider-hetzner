@@ -92,13 +92,13 @@ jobs:
       # 10 GB is the smallest volume. It is enlarged to 11 GB on the start (see below)
       DISK_SIZE: "10"
       MACHINE_ID: test-${{ github.run_id }}
+      # The provider generates a throwaway SSH key pair here on first use
       MACHINE_FOLDER: ${{ github.workspace }}/.ssh
       # The e2e tests deliberately use cpx22, which is not the provider default (cx33).
       # NOTE: Hetzner retires server types over time; if cpx22 is deprecated or
       # unavailable in REGION, pick a current small type and update this value.
       MACHINE_TYPE: "cpx22"
       REGION: "nbg1"
-      SSH_KEY: ${{ secrets.SSH_KEY }}
       # Non-default machine options, checked on the server by machine_options.sh
       SWAP_SIZE: "2"
       CONTAINERS_SWAP_MAX: "1G"
@@ -111,22 +111,12 @@ jobs:
       # are a misconfiguration and must fail rather than silently skip e2e.
       - name: Check e2e secrets
         run: |
-          if [ -z "${HCLOUD_TOKEN}" ] || [ -z "${SSH_KEY}" ]; then
-            echo "::error::HCLOUD_TOKEN and SSH_KEY secrets are required to run e2e"
+          if [ -z "${HCLOUD_TOKEN}" ]; then
+            echo "::error::HCLOUD_TOKEN secret is required to run e2e"
             exit 1
           fi
 
       - uses: hetznercloud/setup-hcloud@28cdd3fc4a4a8013e86d57c7254be72df92fcc02 # v2.0.1
-
-      - name: Set up SSH keys
-        run: |
-          mkdir -p "${MACHINE_FOLDER}"
-          # Strip CRs in case the secret was pasted with CRLF line endings
-          printf '%s\n' "${SSH_KEY}" | tr -d '\r' > "${MACHINE_FOLDER}/sshkey"
-          chmod 600 "${MACHINE_FOLDER}/sshkey"
-          # Derive the public key so it can never drift from the private key
-          ssh-keygen -y -f "${MACHINE_FOLDER}/sshkey" > "${MACHINE_FOLDER}/sshkey.pub"
-          ls -la "${MACHINE_FOLDER}"
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
