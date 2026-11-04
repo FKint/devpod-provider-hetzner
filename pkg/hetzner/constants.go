@@ -49,4 +49,7 @@ const (
 	localStopTimeout = 90 * time.Second
 	// containerStopGrace is the seconds each container gets to exit before it is killed.
 	containerStopGrace = 30
+	// volumeDetachTimeout bounds how long Create waits for the volume of a deleted
+	// server to be released before it can be attached to the new one.
+	volumeDetachTimeout = 2 * time.Minute
 )

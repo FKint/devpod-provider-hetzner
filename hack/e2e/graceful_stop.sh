@@ -30,7 +30,8 @@ FILE="/home/devpod/e2e-unsynced"
 
 case "${1:?usage: graceful_stop.sh before|after}" in
 before)
-  remote "head -c 1048576 /dev/zero | tr '\\0' 'x' > ${FILE} && echo written"
+  # sudo: the volume root (/home/devpod) is owned by root on a fresh volume
+  remote "head -c 1048576 /dev/zero | tr '\\0' 'x' | sudo tee ${FILE} >/dev/null && echo written"
   ;;
 after)
   size="$(remote "stat -c %s ${FILE}" | tr -d '[:space:]')"

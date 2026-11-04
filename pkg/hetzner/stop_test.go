@@ -35,10 +35,6 @@ const (
 	callDelete   = "delete"
 )
 
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-
 // fakeStopAPI serves one running server and records the calls that matter.
 type fakeStopAPI struct {
 	mu    sync.Mutex
@@ -65,9 +61,9 @@ func (f *fakeStopAPI) called() []string {
 
 func (f *fakeStopAPI) handler() http.Handler {
 	server := func(status string) map[string]any {
-		return map[string]any{"id": 5, "name": "machine", "status": status}
+		return map[string]any{keyID: 5, keyName: "machine", keyStatus: status}
 	}
-	action := map[string]any{"action": map[string]any{"id": 1, "status": "success", "progress": 100}}
+	action := map[string]any{"action": map[string]any{keyID: 1, keyStatus: "success", "progress": 100}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/servers", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"servers": []any{server("running")}})
@@ -76,7 +72,7 @@ func (f *fakeStopAPI) handler() http.Handler {
 		f.record(callShutdown)
 		if f.shutdownFails {
 			w.WriteHeader(http.StatusConflict)
-			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "locked", "message": "server locked"}})
+			_ = json.NewEncoder(w).Encode(map[string]any{keyError: map[string]any{"code": "locked", "message": "server locked"}})
 			return
 		}
 		_ = json.NewEncoder(w).Encode(action)
@@ -98,7 +94,7 @@ func (f *fakeStopAPI) handler() http.Handler {
 		if off {
 			status = "off"
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"server": server(status)})
+		_ = json.NewEncoder(w).Encode(map[string]any{keyServer: server(status)})
 	})
 
 	return mux
@@ -165,3 +161,12 @@ func TestStopFromMachineDeletesWhenLocalStepsFail(t *testing.T) {
 	assert.NoError(t, h.Stop(context.Background(), "machine", true))
 	assert.Equal(t, []string{callDelete}, api.called())
 }
+
+// JSON keys shared by the fake API servers in the tests
+const (
+	keyError  = "error"
+	keyID     = "id"
+	keyName   = "name"
+	keyServer = "server"
+	keyStatus = "status"
+)

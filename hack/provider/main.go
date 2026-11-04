@@ -40,6 +40,10 @@ const (
 	// defaultMachineType must be offered by Hetzner when the provider.yaml is
 	// generated; Hetzner retires server types over time (cx32 became cx33).
 	defaultMachineType = "cx33"
+
+	// checkOnlyArg, given instead of a version, only verifies the defaults
+	// against the Hetzner API and generates nothing (no dist/ needed).
+	checkOnlyArg = "check"
 )
 
 type platform struct{ os, arch string }
@@ -67,7 +71,7 @@ var platforms = []platform{
 
 func main() {
 	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "Expected version as argument")
+		fmt.Fprintf(os.Stderr, "Usage: %s <version>|%s\n", os.Args[0], checkOnlyArg)
 		os.Exit(1)
 		return
 	}
@@ -115,6 +119,11 @@ func main() {
 	// so refuse to generate a provider.yaml with one
 	if err := checkMachineTypeOffered(defaultMachineType, machineTypes); err != nil {
 		panic(err)
+	}
+
+	// Check-only mode needs just the Hetzner API, not the built binaries
+	if os.Args[1] == checkOnlyArg {
+		return
 	}
 
 	checksums := map[string]string{}
