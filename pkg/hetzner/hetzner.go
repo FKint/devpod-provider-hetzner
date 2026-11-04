@@ -907,13 +907,13 @@ func attemptConnection(ctx context.Context, ip string, privateKeyFile []byte) (*
 
 	buf := new(bytes.Buffer)
 	if err := ssh.Run(attemptCtx, sshClient, "cloud-init status || true", &bytes.Buffer{}, buf, &bytes.Buffer{}, nil); err != nil {
-		log.Default.Errorf("Error retrieving cloud-init status, %v", err)
+		log.Default.Warnf("cloud-init status check interrupted (the server is probably still booting), retrying: %v", err)
 		return nil, err
 	}
 
 	status, err := parseCloudInitStatus(buf.Bytes())
 	if err != nil {
-		log.Default.Errorf("Unable to parse cloud-init YAML: %v", err)
+		log.Default.Warnf("Unable to parse cloud-init status, retrying: %v", err)
 		return nil, err
 	}
 

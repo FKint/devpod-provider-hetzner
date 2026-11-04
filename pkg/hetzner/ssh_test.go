@@ -162,6 +162,26 @@ func TestAttemptConnectionDistinguishesAuthFromUnreachable(t *testing.T) {
 	assert.NotErrorIs(t, err, errSSHAuth)
 }
 
+// A session cut short while the server boots (cloud-init restarting sshd) surfaces as
+// a failed command, which the poll loop retries.
+func TestAttemptConnectionReportsAnInterruptedStatusCheck(t *testing.T) {
+	d, key := newFakeSSHD(t)
+	d.statusExit = 130
+	status, err := attemptConnection(context.Background(), fakeServerIP, key)
+	assert.Error(t, err)
+	assert.Nil(t, status)
+	assert.NotErrorIs(t, err, errSSHAuth)
+	assert.NotErrorIs(t, err, errUnreachable)
+}
+
+func TestAttemptConnectionReportsUnparsableStatus(t *testing.T) {
+	d, key := newFakeSSHD(t)
+	d.statusOutput = "status: [unterminated\n"
+	status, err := attemptConnection(context.Background(), fakeServerIP, key)
+	assert.Error(t, err)
+	assert.Nil(t, status)
+}
+
 func TestWaitForProvisionedWaitsForCloudInit(t *testing.T) {
 	d, key := newFakeSSHD(t, statusRunning, statusRunning, "degraded done")
 	h := &Hetzner{poll: time.Millisecond}
