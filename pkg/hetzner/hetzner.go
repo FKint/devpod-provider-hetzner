@@ -309,6 +309,41 @@ func (h *Hetzner) Create(
 	return h.waitForProvisioned(ctx, createdServer, privateKeyFile, false)
 }
 
+// attemptLabels returns a new attempt ID and a copy of base carrying it as the
+// createAttempt label.
+func attemptLabels(base map[string]string) (attempt string, labels map[string]string) {
+	attempt = rand.Text()
+	labels = maps.Clone(base)
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	labels[labelCreateAttempt] = attempt
+
+	return attempt, labels
+}
+
+// findAttempt looks a resource up by name after a create whose response may have been
+// lost (e.g. a request timeout). It returns the resource only if it carries this
+// attempt's label, so one a concurrent run created under the same name is left alone.
+func findAttempt[T any](
+	ctx context.Context,
+	kind, name, attempt string,
+	lookup func(context.Context, string) (*T, error),
+	labelsOf func(*T) map[string]string,
+) *T {
+	// The context may be what failed (e.g. Ctrl-C), so don't reuse it
+	existing, err := lookup(context.WithoutCancel(ctx), name)
+	switch {
+	case err != nil:
+		log.Default.Warnf("Could not check whether %s %s was created, remove it manually if it exists: %v",
+			kind, name, err)
+	case existing != nil && labelsOf(existing)[labelCreateAttempt] == attempt:
+		return existing
+	}
+
+	return nil
+}
+
 // createVolume creates the machine's data volume and waits for it. The volume is stored
 // in created as soon as it is known to be ours, even when an error follows, so the
 // caller can remove it.
@@ -323,12 +358,7 @@ func (h *Hetzner) createVolume(
 
 	// Marks this attempt's volume, so a lookup after a lost response can tell it
 	// from one a concurrent run created under the same name
-	attempt := rand.Text()
-	labels := maps.Clone(req.Labels)
-	if labels == nil {
-		labels = map[string]string{}
-	}
-	labels[labelCreateAttempt] = attempt
+	attempt, labels := attemptLabels(req.Labels)
 
 	result, _, err := h.client.Volume.Create(ctx, hcloud.VolumeCreateOpts{
 		Location:  req.Location,
@@ -341,12 +371,8 @@ func (h *Hetzner) createVolume(
 	if err != nil {
 		// The volume may exist although the response got lost (e.g. a request
 		// timeout). It is ours only if it carries this attempt's label.
-		existing, lookupErr := h.volumeByName(context.WithoutCancel(ctx), req.Name)
-		switch {
-		case lookupErr != nil:
-			log.Default.Warnf("Could not check whether volume %s was created, remove it manually if it exists: %v",
-				req.Name, lookupErr)
-		case existing != nil && existing.Labels[labelCreateAttempt] == attempt:
+		if existing := findAttempt(ctx, "volume", req.Name, attempt, h.volumeByName,
+			func(v *hcloud.Volume) map[string]string { return v.Labels }); existing != nil {
 			*created = existing
 		}
 
@@ -401,13 +427,9 @@ func (h *Hetzner) createServerWithRetry(ctx context.Context, req *hcloud.ServerC
 func (h *Hetzner) createServer(ctx context.Context, req *hcloud.ServerCreateOpts, created **hcloud.Server) error {
 	// Marks this attempt's server, so a lookup after a lost response can tell it from
 	// one a concurrent run created under the same name
-	attempt := rand.Text()
+	attempt, labels := attemptLabels(req.Labels)
 	opts := *req
-	opts.Labels = maps.Clone(req.Labels)
-	if opts.Labels == nil {
-		opts.Labels = map[string]string{}
-	}
-	opts.Labels[labelCreateAttempt] = attempt
+	opts.Labels = labels
 
 	server, _, err := h.client.Server.Create(ctx, opts)
 	if server.Server != nil {
@@ -418,12 +440,8 @@ func (h *Hetzner) createServer(ctx context.Context, req *hcloud.ServerCreateOpts
 		if server.Server == nil {
 			// The server may exist although the response got lost (e.g. a request
 			// timeout). It is ours only if it carries this attempt's label.
-			existing, lookupErr := h.GetByName(context.WithoutCancel(ctx), req.Name)
-			switch {
-			case lookupErr != nil:
-				log.Default.Warnf("Could not check whether server %s was created, remove it manually if it exists: %v",
-					req.Name, lookupErr)
-			case existing != nil && existing.Labels[labelCreateAttempt] == attempt:
+			if existing := findAttempt(ctx, "server", req.Name, attempt, h.GetByName,
+				func(sv *hcloud.Server) map[string]string { return sv.Labels }); existing != nil {
 				*created = existing
 			}
 		}
@@ -899,8 +917,9 @@ func (h *Hetzner) quiesceLocal(ctx context.Context) {
 	if err := run(stopCtx, "sh", "-c", stopAll); err != nil {
 		log.Default.Warnf("Could not stop the containers, continuing: %v", err)
 	}
-	// Its own budget: a slow container stop must not leave sync with an expired context
-	syncCtx, cancelSync := context.WithTimeout(ctx, localStopTimeout)
+	// Its own, shorter budget: a slow container stop must not leave sync with an
+	// expired context, and a hung sync must not double the worst-case wait
+	syncCtx, cancelSync := context.WithTimeout(ctx, localSyncTimeout)
 	defer cancelSync()
 	if err := run(syncCtx, "sync"); err != nil {
 		log.Default.Warnf("Could not sync the disks, continuing: %v", err)
@@ -976,12 +995,10 @@ func attemptConnection(ctx context.Context, ip string, privateKeyFile []byte) (*
 	case errors.Is(err, errUnreachable):
 		log.Default.Debugf("Server not reachable yet: %v", err)
 		return nil, err
+	case errors.Is(err, errSSHAuth):
+		log.Default.Warnf("Unable to connect to server: %v", err)
+		return nil, err
 	case err != nil:
-		// x/crypto/ssh has no typed error for a refused key, only this message
-		if strings.Contains(err.Error(), "unable to authenticate") {
-			log.Default.Warnf("Unable to connect to server: %v", err)
-			return nil, fmt.Errorf("%w: %w", errSSHAuth, err)
-		}
 		// Expected while sshd is starting (EOF, connection reset)
 		log.Default.Debugf("Unable to connect to server yet: %v", err)
 		return nil, err
@@ -1051,10 +1068,22 @@ func DialSSH(ctx context.Context, ip string, privateKey []byte) (*cryptoSsh.Clie
 	if err != nil {
 		_ = conn.Close()
 
-		return nil, fmt.Errorf("dial to %v failed: %w", target, err)
+		err = fmt.Errorf("dial to %v failed: %w", target, err)
+		if isAuthRefused(err) {
+			err = fmt.Errorf("%w: %w", errSSHAuth, err)
+		}
+
+		return nil, err
 	}
 
 	return cryptoSsh.NewClient(c, chans, reqs), nil
+}
+
+// isAuthRefused reports whether a handshake error means the server refused our key.
+// x/crypto/ssh has no typed error for that, only this message, so the check lives
+// here, next to the one place that produces the error.
+func isAuthRefused(err error) bool {
+	return strings.Contains(err.Error(), "unable to authenticate")
 }
 
 func parseCloudInitStatus(out []byte) (*cloudInit, error) {
