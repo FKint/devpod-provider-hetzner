@@ -132,6 +132,12 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # Fails when the provider's default machine type is no longer offered by
+      # Hetzner, so a retired default is caught on the PR rather than at release.
+      # Creates no resources.
+      - name: Default machine type is still offered
+        run: go run ./hack/provider check
+
       - run: go build -o provider .
 
       - name: A swap file that does not fit is refused before anything is created
@@ -152,6 +158,10 @@ jobs:
       - name: Create Docker state on the volume
         run: ./hack/e2e/persistence.sh before
 
+      # Directly before the stop, so the data is still unflushed when it happens
+      - name: Write unflushed data
+        run: ./hack/e2e/graceful_stop.sh before
+
       - name: Stop command
         run: ./provider stop
 
@@ -160,6 +170,9 @@ jobs:
 
       - name: Start command
         run: ./provider start
+
+      - name: Unflushed data survived the stop
+        run: ./hack/e2e/graceful_stop.sh after
 
       - name: Status is Running again
         run: ./hack/e2e/assert_status.sh Running

@@ -41,14 +41,15 @@ const (
 	// defaultMachineType must be offered by Hetzner when the provider.yaml is
 	// generated; Hetzner retires server types over time (cx32 became cx33).
 	defaultMachineType = "cx33"
+
+	// checkOnlyArg, given instead of a version, only verifies the defaults
+	// against the Hetzner API and generates nothing (no dist/ needed).
+	checkOnlyArg = "check"
 )
 
-const (
-	optionTrue  = "true"
-	optionFalse = "false"
-)
+const optionTrue = "true"
 
-var boolEnum = types.OptionEnumArray{{Value: optionTrue}, {Value: optionFalse}}
+var boolEnum = types.OptionEnumArray{{Value: optionTrue}, {Value: "false"}}
 
 const memoryMessage = "Use a percentage of RAM (e.g. 90%), a size (e.g. 7G) or infinity."
 
@@ -91,7 +92,7 @@ var platforms = []platform{
 
 func main() {
 	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "Expected version as argument")
+		fmt.Fprintf(os.Stderr, "Usage: %s <version>|%s\n", os.Args[0], checkOnlyArg)
 		os.Exit(1)
 		return
 	}
@@ -139,6 +140,11 @@ func main() {
 	// so refuse to generate a provider.yaml with one
 	if err := checkMachineTypeOffered(defaultMachineType, machineTypes); err != nil {
 		panic(err)
+	}
+
+	// Check-only mode needs just the Hetzner API, not the built binaries
+	if os.Args[1] == checkOnlyArg {
+		return
 	}
 
 	checksums := map[string]string{}
@@ -214,20 +220,7 @@ func BuildConfig(
 			{
 				Name:           "Docker options",
 				DefaultVisible: false,
-				Options: []string{
-					options.EnvPersistDocker,
-					options.EnvContainerdImageStore,
-					options.EnvBuildCacheSize,
-					options.EnvPruneImagesAfter,
-					options.EnvPruneAnonymousVolumes,
-					options.EnvSwapSize,
-					options.EnvContainersMemoryHigh,
-					options.EnvContainersMemoryMax,
-					options.EnvContainersSwapMax,
-					options.EnvContainersTasksMax,
-					options.EnvContainersCPUQuota,
-					options.EnvSwappiness,
-				},
+				Options:        options.MachineEnvs,
 			},
 			{
 				Name:           "Agent options",
@@ -353,7 +346,7 @@ fi`,
 			InjectDockerCredentials: "${INJECT_DOCKER_CREDENTIALS}",
 			Binaries:                map[string][]*provider.ProviderBinary{"HETZNER_PROVIDER": binaries("linux")},
 			Exec: provider.ProviderAgentConfigExec{
-				Shutdown: types.StrArray{"${HETZNER_PROVIDER} stop"},
+				Shutdown: types.StrArray{"${HETZNER_PROVIDER} stop --from-machine"},
 			},
 		},
 		Binaries: map[string][]*provider.ProviderBinary{"HETZNER_PROVIDER": binaries("")},
