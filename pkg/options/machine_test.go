@@ -166,3 +166,15 @@ func TestMachineFromEnvResourceLimits(t *testing.T) {
 	assert.Equal(t, "350%", m.ContainersCPUQuota)
 	assert.Equal(t, "150", m.Swappiness)
 }
+
+// The patterns already refuse these; the parsed check is the second line of defence
+func TestLimitProblem(t *testing.T) {
+	const want = "want a size"
+	assert.Empty(t, limitProblem("85%", want))
+	assert.Empty(t, limitProblem("100%", want))
+	assert.Empty(t, limitProblem("6G", want))
+	assert.Contains(t, limitProblem("0%", want), "above 0")
+	assert.Contains(t, limitProblem("0G", want), "above 0")
+	assert.Contains(t, limitProblem("101%", want), "exceed 100%")
+	assert.Equal(t, want, limitProblem("abc", want))
+}

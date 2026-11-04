@@ -207,17 +207,26 @@ func (p *envParser) limit(name, def string, re *regexp.Regexp, want string) stri
 		return v
 	}
 
-	n, err := strconv.ParseFloat(strings.TrimRight(v, "%KMGT"), 64)
-	switch {
-	case err != nil:
-		p.fail(name, v, want)
-	case n == 0:
-		p.fail(name, v, "must be above 0 (use infinity for no limit)")
-	case strings.HasSuffix(v, "%") && n > 100:
-		p.fail(name, v, "a percentage can't exceed 100%")
+	if problem := limitProblem(v, want); problem != "" {
+		p.fail(name, v, problem)
 	}
 
 	return v
+}
+
+// limitProblem double-checks a limit that matched its pattern: why it is unusable, or "".
+func limitProblem(v, want string) string {
+	n, err := strconv.ParseFloat(strings.TrimRight(v, "%KMGT"), 64)
+	switch {
+	case err != nil:
+		return want
+	case n == 0:
+		return "must be above 0 (use infinity for no limit)"
+	case strings.HasSuffix(v, "%") && n > 100:
+		return "a percentage can't exceed 100%"
+	}
+
+	return ""
 }
 
 // tasksMax reads CONTAINERS_TASKS_MAX.

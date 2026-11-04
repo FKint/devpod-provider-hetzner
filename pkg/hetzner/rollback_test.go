@@ -155,3 +155,22 @@ func TestCreateAcceptsARequestWithoutLabels(t *testing.T) {
 		assert.Error(t, cloud.hetzner(t).Create(context.Background(), req, 10, &options.Machine{}, testPublicKey, nil))
 	})
 }
+
+// When the lookup after a lost response fails too, the create still fails with its own error
+func TestCreateReportsTheOriginalErrorWhenTheLookupAfterALostResponseFails(t *testing.T) {
+	for _, tt := range []struct{ name, lost, list string }{
+		{"volume", reqCreateVolume, reqListVolumes},
+		{"server", reqCreateServer, reqListServers},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cloud := newFakeCloud()
+			cloud.loseResponse(tt.lost)
+			// The first list belongs to the checks before the create, the second is the lookup
+			cloud.failAfter(tt.list, 1)
+			_, key := newFakeSSHD(t)
+
+			err := createMachine(t, cloud, key, 10)
+			assert.ErrorContains(t, err, tt.lost)
+		})
+	}
+}
