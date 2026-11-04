@@ -15,8 +15,12 @@ jobs:
   sweep:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    # Holds the Hetzner token; the same environment as the e2e job
-    environment: Hetzner E2E
+    # Deliberately NOT "Hetzner E2E": that environment requires manual approval,
+    # which would block every scheduled run. This one must have no required
+    # reviewers, and holds its own HCLOUD_TOKEN secret (a project token that can
+    # list and delete servers, volumes and SSH keys). Restrict it to the main
+    # branch under the environment's deployment branch rules.
+    environment: Hetzner Sweeper
     env:
       HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
     steps:
