@@ -42,10 +42,12 @@ type Options struct {
 func FromEnv(skipMachine bool) (*Options, error) {
 	o := &Options{}
 
-	required := []struct {
+	type option struct {
 		name string
 		dest *string
-	}{
+	}
+
+	required := []option{
 		{"HCLOUD_TOKEN", &o.Token},
 		{"DISK_SIZE", &o.DiskSize},
 		{"DISK_IMAGE", &o.DiskImage},
@@ -53,10 +55,7 @@ func FromEnv(skipMachine bool) (*Options, error) {
 		{"REGION", &o.Region},
 	}
 	if !skipMachine {
-		required = append([]struct {
-			name string
-			dest *string
-		}{{"MACHINE_ID", &o.MachineID}, {"MACHINE_FOLDER", &o.MachineFolder}}, required...)
+		required = append([]option{{"MACHINE_ID", &o.MachineID}, {"MACHINE_FOLDER", &o.MachineFolder}}, required...)
 	}
 
 	for _, r := range required {
