@@ -27,6 +27,7 @@ var (
 	ErrServerBusy           = errors.New("server is busy")
 	ErrDiskTooSmall         = errors.New("disk size too small")
 	ErrVolumeAttached       = errors.New("volume is attached to another server")
+	ErrSwapTooLarge         = errors.New("swap does not fit on the server's local disk")
 	errSSHAuth              = errors.New("ssh authentication failed")
 	ErrBadSSHKey            = errors.New("bad ssh key")
 	ErrMultipleServersFound = func(name string) error {

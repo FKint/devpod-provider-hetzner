@@ -29,6 +29,7 @@ var allMachineEnvs = []string{
 	EnvPersistDocker, EnvContainerdImageStore, EnvBuildCacheSize, EnvPruneImagesAfter,
 	EnvPruneAnonymousVolumes, EnvSwapSize, EnvContainersMemoryHigh, EnvContainersMemoryMax, EnvContainersSwapMax,
 	EnvVolumeFormat,
+	EnvContainersTasksMax, EnvContainersCPUQuota, EnvSwappiness,
 }
 
 func clearMachineEnv(t *testing.T) {
@@ -54,6 +55,7 @@ func TestMachineFromEnvDefaults(t *testing.T) {
 		ContainersMemoryHigh:  infinity,
 		ContainersMemoryMax:   "90%",
 		ContainersSwapMax:     "4G",
+		ContainersTasksMax:    "32768",
 	}, m)
 }
 
@@ -78,6 +80,7 @@ func TestMachineFromEnvOverrides(t *testing.T) {
 		ContainersMemoryHigh: "6G",
 		ContainersMemoryMax:  infinity,
 		ContainersSwapMax:    "2G",
+		ContainersTasksMax:   "32768",
 	}, m)
 }
 
@@ -92,8 +95,11 @@ func TestMachineFromEnvInvalid(t *testing.T) {
 		EnvContainersMemoryHigh:  {"85", "101%", "6GB", "6G\nMemoryMax=1", "0%", "0G", "85.555%"},
 		EnvContainersMemoryMax:   {"lots"},
 		// A percentage is not scaled by RAM for swap, so only sizes are accepted
-		EnvContainersSwapMax: {"half", "50%", "0G"},
-		EnvVolumeFormat:      {"btrfs", "XFS", "xfs;"},
+		EnvContainersSwapMax:  {"half", "50%", "0G"},
+		EnvVolumeFormat:       {"btrfs", "XFS", "xfs;"},
+		EnvContainersTasksMax: {"0", "-1", "lots", "99999999999", "1 || true"},
+		EnvContainersCPUQuota: {"0%", "350", "3.5", "1%\nMemoryMax=1"},
+		EnvSwappiness:         {"201", "-1", "60%", "1000", "high"},
 	} {
 		for _, v := range values {
 			clearMachineEnv(t)
@@ -118,6 +124,9 @@ func TestMachinePatterns(t *testing.T) {
 			DefaultContainersMemoryHigh: true, DefaultContainersMemoryMax: true, "6G": true, "85.25%": true,
 			"85": false, "85.255%": false,
 		},
+		PatternTasksMax:    {DefaultContainersTasksMax: true, infinity: true, "": false, "-1": false},
+		PatternCPUQuota:    {"": true, "350%": true, "350": false, "3.5%": false},
+		PatternSwappiness:  {"": true, "100": true, "1000": false, "-1": false},
 		PatternSystemdSize: {DefaultContainersSwapMax: true, infinity: true, "50%": false, "4": false},
 	} {
 		re := regexp.MustCompile(pattern)
@@ -125,4 +134,17 @@ func TestMachinePatterns(t *testing.T) {
 			assert.Equal(t, want, re.MatchString(v), "%s ~ %q", pattern, v)
 		}
 	}
+}
+
+func TestMachineFromEnvResourceLimits(t *testing.T) {
+	clearMachineEnv(t)
+	t.Setenv(EnvContainersTasksMax, infinity)
+	t.Setenv(EnvContainersCPUQuota, "350%")
+	t.Setenv(EnvSwappiness, "150")
+
+	m, err := MachineFromEnv()
+	assert.NoError(t, err)
+	assert.Equal(t, infinity, m.ContainersTasksMax)
+	assert.Equal(t, "350%", m.ContainersCPUQuota)
+	assert.Equal(t, "150", m.Swappiness)
 }

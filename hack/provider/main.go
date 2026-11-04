@@ -321,6 +321,18 @@ fi`,
 				"Swap all containers together may use, so some stays for the host and a runaway container "+
 					"reaches the memory limit (and is killed) sooner. A size (4G) or infinity.",
 				options.DefaultContainersSwapMax, nil, options.PatternSystemdSize, "Use a size such as 4G, or infinity."),
+			options.EnvContainersTasksMax: machineOption(
+				"Processes and threads all containers together may have, so a fork bomb can't exhaust the "+
+					"host's process table. A number or infinity.",
+				options.DefaultContainersTasksMax, nil, options.PatternTasksMax, "Use a number such as 32768, or infinity."),
+			options.EnvContainersCPUQuota: machineOption(
+				"Hard CPU cap for all containers together, as a percentage of one CPU (350% = 3.5 CPUs). "+
+					"Empty means no cap.",
+				options.DefaultContainersCPUQuota, nil, options.PatternCPUQuota, "Use a percentage such as 350%, or leave empty."),
+			options.EnvSwappiness: machineOption(
+				"Kernel vm.swappiness (0-200). Empty keeps the kernel default (60). Higher values swap idle memory "+
+					"out sooner, which is cheaper than re-reading evicted files from the volume.",
+				options.DefaultSwappiness, nil, options.PatternSwappiness, "Use a number between 0 and 200, or leave empty."),
 			"INACTIVITY_TIMEOUT": {
 				Description: "If defined, will automatically stop the VM after the inactivity period.",
 				Default:     "10m",
