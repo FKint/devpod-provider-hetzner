@@ -1049,6 +1049,7 @@ type userDataParams struct {
 func generateUserData(publicKey string, volumeID int64, machine *options.Machine) (*bytes.Buffer, error) {
 	// Only the type and key data go into the quoted YAML scalar: the comment is free
 	// text and a quote or backslash in it would break the whole cloud-config.
+	//nolint:dogsled // correct assignment
 	pk, _, _, _, err := cryptoSsh.ParseAuthorizedKey([]byte(publicKey))
 	if err != nil {
 		return nil, fmt.Errorf("parse public ssh key: %w", err)
