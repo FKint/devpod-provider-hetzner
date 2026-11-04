@@ -55,8 +55,10 @@ jobs:
       - name: go-vet
         run: go vet -v ./...
 
+      # -race: the provider polls and dials from goroutines. -shuffle: tests must not depend
+      # on each other. -count=1: never reuse a cached result.
       - name: go-test
-        run: go test -v -covermode=atomic -coverprofile=coverage.out ./...
+        run: go test -race -shuffle=on -count=1 -covermode=atomic -coverprofile=coverage.out ./...
 
       - name: Coverage report
         run: |
@@ -76,6 +78,10 @@ jobs:
             coverage.out
             coverage.html
           retention-days: 14
+
+      # Preinstalled on the runner. The boot script in cloud-config.yaml is checked by go-test.
+      - name: shellcheck
+        run: shellcheck hack/*.sh hack/e2e/*.sh
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0

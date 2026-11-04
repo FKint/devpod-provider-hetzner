@@ -20,6 +20,7 @@
 #        volume_size.sh after <size-gb>    (machine recreated with DISK_SIZE=<size-gb>)
 
 set -euo pipefail
+# shellcheck source=lib.sh
 . "$(dirname "$0")/lib.sh"
 
 MOUNT="/home/devpod"

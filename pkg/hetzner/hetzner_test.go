@@ -96,7 +96,7 @@ func TestCloudInitStatus(t *testing.T) {
 	}
 
 	assert.True(t, isCloudInitFailed("error"))
-	assert.False(t, isCloudInitFailed("running"))
+	assert.False(t, isCloudInitFailed(statusRunning))
 }
 
 func TestGenerateUserData(t *testing.T) {

@@ -17,6 +17,7 @@
 # sets non-default values for them (SWAP_SIZE=2, CONTAINERS_SWAP_MAX=1G, CONTAINERS_TASKS_MAX=1234, SWAPPINESS=10).
 
 set -euo pipefail
+# shellcheck source=lib.sh
 . "$(dirname "$0")/lib.sh"
 
 # SWAP_SIZE=2 (GB)

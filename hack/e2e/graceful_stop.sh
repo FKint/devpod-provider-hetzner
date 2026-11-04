@@ -24,6 +24,7 @@
 # shutdown flushed the filesystem first.
 
 set -euo pipefail
+# shellcheck source=lib.sh
 . "$(dirname "$0")/lib.sh"
 
 FILE="/home/devpod/e2e-unsynced"
