@@ -181,7 +181,8 @@ jobs:
       CONTAINERS_TASKS_MAX: "1234"
       SWAPPINESS: "10"
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Fork PRs are excluded by the job-level `if`, so missing secrets here
       # are a misconfiguration and must fail rather than silently skip e2e.
@@ -192,7 +193,8 @@ jobs:
             exit 1
           fi
 
-      - uses: hetznercloud/setup-hcloud@28cdd3fc4a4a8013e86d57c7254be72df92fcc02 # v2.0.1
+      - name: Install the hcloud CLI
+        uses: hetznercloud/setup-hcloud@28cdd3fc4a4a8013e86d57c7254be72df92fcc02 # v2.0.1
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -205,18 +207,19 @@ jobs:
       - name: Default machine type is still offered
         run: go run ./hack/provider check
 
-      - run: go build -o provider .
+      - name: Build the provider binary
+        run: go build -o provider .
 
       - name: A swap file that does not fit is refused before anything is created
         run: ./hack/e2e/swap_too_large.sh
 
-      - name: Create command
+      - name: Create the server and volume (provider create)
         run: ./provider create
 
-      - name: Status is Running
+      - name: Status is Running after create
         run: ./hack/e2e/assert_status.sh Running
 
-      - name: Run command
+      - name: Command runs on the server and reports its hostname (provider command)
         run: ./hack/e2e/assert_hostname.sh
 
       - name: Machine options reach the server
@@ -232,13 +235,13 @@ jobs:
       - name: Write unflushed data
         run: ./hack/e2e/graceful_stop.sh before
 
-      - name: Stop command
+      - name: Stop the server (provider stop)
         run: ./provider stop
 
-      - name: Status is Stopped
+      - name: Status is Stopped after stop
         run: ./hack/e2e/assert_status.sh Stopped
 
-      - name: Start command
+      - name: Start the server with a larger volume (provider start)
         env:
           # Raised since the create: the volume is enlarged and the filesystem grown
           DISK_SIZE: "11"
@@ -253,7 +256,7 @@ jobs:
       - name: Status is Running again
         run: ./hack/e2e/assert_status.sh Running
 
-      - name: Run command
+      - name: Command runs on the recreated server and reports its hostname (provider command)
         run: ./hack/e2e/assert_hostname.sh
 
       - name: Machine options reach the recreated server
@@ -262,14 +265,14 @@ jobs:
       - name: Docker state survived the stop and start
         run: ./hack/e2e/persistence.sh after
 
-      - name: Delete command
+      - name: Delete everything (provider delete)
         run: ./provider delete
 
-      - name: Status is NotFound
+      - name: Status is NotFound after delete
         run: ./hack/e2e/assert_status.sh NotFound
 
       # This can fail due to resources failing to detach properly
-      - name: Ensure destruction
+      - name: Ensure all Hetzner resources are destroyed
         if: ${{ always() }}
         uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 # v4.0.0
         with:
@@ -283,7 +286,8 @@ jobs:
         if: ${{ success() }}
         run: echo "${{ needs.e2e-cache.outputs.key }}" > e2e-ok
 
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - name: Upload the e2e pass marker
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ success() }}
         with:
           name: e2e-ok-${{ needs.e2e-cache.outputs.key }}
