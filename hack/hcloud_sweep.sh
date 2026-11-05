@@ -45,14 +45,18 @@ for id in $(stale volume); do
   hcloud volume delete "${id}" || status=1
 done
 
-# Primary IPs outlive a server whose create was interrupted. Only unassigned
-# ones are touched: those labelled machineId=test-*, or auto-created ones
-# (auto_delete, generic primary_ip-<id> name). IPs created by hand have
-# auto_delete off by default and are left alone.
+# Primary IPs outlive a server whose create was interrupted, either unassigned
+# or still pointing at a server that no longer exists (a dangling assignment,
+# which Hetzner neither releases nor auto-deletes). IPs assigned to a live
+# server are never touched. Matched by label machineId=test-*, or as
+# auto-created (auto_delete, generic primary_ip-<id> name); IPs created by hand
+# have auto_delete off by default and are left alone.
 stale_primary_ips() {
-  hcloud primary-ip list -o json | jq -r --argjson cutoff "${cutoff}" '
+  local servers
+  servers=$(hcloud server list -o json | jq -c '[.[].id]')
+  hcloud primary-ip list -o json | jq -r --argjson cutoff "${cutoff}" --argjson servers "${servers}" '
     .[]
-    | select(.assignee_id == null)
+    | select(.assignee_id == null or (.assignee_id as $a | $servers | index($a) | not))
     | select(((.labels.machineId // "") | startswith("test-")) or (.auto_delete and (.name | test("^primary_ip-[0-9]+$"))))
     | select((.created | sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | fromdateiso8601) < $cutoff)
     | .id'
@@ -60,6 +64,8 @@ stale_primary_ips() {
 
 for id in $(stale_primary_ips); do
   echo "Deleting stale primary IP ${id}"
+  # A dangling assignment must be cleared first; this fails harmlessly if unassigned.
+  hcloud primary-ip unassign "${id}" 2>/dev/null || true
   hcloud primary-ip delete "${id}" || status=1
 done
 
