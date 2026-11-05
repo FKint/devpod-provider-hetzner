@@ -1,7 +1,9 @@
 name: Sweep leaked e2e resources
-# Deletes Hetzner servers, volumes and SSH keys labelled machineId=test-* that are
-# older than an hour, i.e. left behind by e2e runs whose cleanup never ran
-# (for example a cancelled workflow).
+# Deletes Hetzner servers, volumes, SSH keys and primary IPs labelled
+# machineId=test-* (plus auto-created orphaned primary IPs) that are older than an
+# hour, i.e. left behind by e2e runs whose cleanup never ran (for example a
+# cancelled workflow). Primary IPs still assigned to a deleted server are
+# unassigned first.
 on:
   schedule:
     - cron: 17 * * * *

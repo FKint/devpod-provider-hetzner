@@ -48,8 +48,10 @@ for i in ${ssh_keys}; do
 done
 
 # Auto-created primary IPs are normally deleted with their server; remove any
-# that were left behind (ignoring ones already gone).
+# that were left behind (ignoring ones already gone). A cancelled create can
+# leave an IP assigned to the deleted server, so unassign it first.
 for i in ${primary_ips}; do
   echo "Deleting primary IP ${i}"
+  hcloud primary-ip unassign "${i}" 2>/dev/null || true
   hcloud primary-ip delete "${i}" 2>/dev/null || true
 done
