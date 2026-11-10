@@ -44,7 +44,8 @@ runcmd:
   # all Docker and containerd state (see write_files). Stop (an explicit exit
   # ends this script; other failures don't) rather than run Docker without it.
   - mountpoint -q /home/{{ .Username }} || exit 1
-  # Install Docker
+  # Install Docker, with the daemon settings already in place (see write_files)
+  - install -m 0644 /etc/docker/devpod-daemon.json /etc/docker/daemon.json
   - if command -v docker >/dev/null; then echo "Docker already installed"; else curl -fsSL https://get.docker.com | sh; fi
   # Grow the filesystem if the volume was enlarged (DISK_SIZE); a no-op otherwise.
   # ext4 volumes also get their root-reserved blocks cut from 5% to 1%.
@@ -96,7 +97,10 @@ write_files:
   # (CONTAINERD_IMAGE_STORE) is set explicitly: it is the default only on
   # fresh Engine 29+ installs. Its images and container snapshots live under
   # containerd's root, below.
-  - path: /etc/docker/daemon.json
+  # This is the source of truth, not daemon.json: DevPod's agent overwrites
+  # daemon.json with just the snapshotter setting, so the drop-in below copies
+  # this file back over it on every dockerd start.
+  - path: /etc/docker/devpod-daemon.json
     content: |
       {
 {{- if .Machine.PersistDocker }}
@@ -116,6 +120,10 @@ write_files:
         "log-driver": "local",
         "live-restore": true
       }
+  - path: /etc/systemd/system/docker.service.d/20-devpod-daemon.conf
+    content: |
+      [Service]
+      ExecStartPre=/usr/bin/install -m 0644 /etc/docker/devpod-daemon.json /etc/docker/daemon.json
 {{- if .Machine.PersistDocker }}
   # Don't start Docker or containerd until the persistent volume is mounted
   - path: /etc/systemd/system/docker.service.d/10-devpod-volume.conf
