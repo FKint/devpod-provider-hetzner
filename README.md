@@ -180,8 +180,11 @@ workspace with `devpod up <workspace> --provider-option KEY=VALUE`.
 `SWAP_SIZE` plus 4 GB must fit on the server type's local disk, otherwise
 creating the server fails early. Swap lives on the local disk and is lost on
 every stop. A tmpfs `/tmp` is charged to the container's memory limit, so it
-can't outgrow `CONTAINERS_MEMORY_MAX` plus `CONTAINERS_SWAP_MAX`. After the
-server is provisioned the provider warns if the volume is more than 85% full.
+can't outgrow `CONTAINERS_MEMORY_MAX` plus `CONTAINERS_SWAP_MAX` (4G by
+default, whatever `SWAP_SIZE` is). After the server is provisioned the provider
+warns if the volume is more than 85% full. See
+[Temporary files](#temporary-files) before putting large scratch data in
+`/tmp`.
 
 Limitations: there are no per-container disk quotas (`--storage-opt size=`
 needs the overlay2 driver on XFS with `pquota`, not the containerd image
@@ -196,7 +199,7 @@ Everything that concerns a single dev container is set in its
 
 | To | Set in `devcontainer.json` |
 | --- | --- |
-| Keep `/tmp` off the volume (in RAM, spilling to local swap) | `"mounts": ["type=tmpfs,target=/tmp,tmpfs-mode=1777,tmpfs-size=4g"]` |
+| Keep a small `/tmp` off the volume (in RAM, spilling to local swap; see [Temporary files](#temporary-files)) | `"mounts": ["type=tmpfs,target=/tmp,tmpfs-mode=1777,tmpfs-size=4g"]` |
 | …and allow running programs from it | `"runArgs": ["--tmpfs", "/tmp:exec,mode=1777,size=4g"]` instead (Docker mounts tmpfs `noexec` by default) |
 | Keep `/tmp` on disk | Leave it out: `/tmp` is then part of the container's filesystem, on the volume with `PERSIST_DOCKER` |
 | Enlarge shared memory (browsers, PyTorch data loaders) | `"runArgs": ["--shm-size=2g"]` |
@@ -207,10 +210,68 @@ Everything that concerns a single dev container is set in its
 | Use another log driver | `"runArgs": ["--log-driver=json-file"]` |
 | Persist a directory per workspace | `"mounts": ["source=my-project-${devcontainerId}-data,target=/data,type=volume"]` |
 | Share a cache between workspaces | A named volume with a fixed name, e.g. `source=uv-cache,...` |
-| Scratch space on the local disk (fast, lost on stop, shared by the machine's workspaces) | `"mounts": ["source=/var/tmp,target=/scratch,type=bind"]` |
+| Large scratch space on the local disk (fast, lost on stop, shared by the machine's workspaces; see [Temporary files](#temporary-files)) | `"mounts": ["source=/var/tmp,target=/scratch,type=bind"]` |
 | Set environment variables, e.g. cache locations | `"containerEnv": {"UV_CACHE_DIR": "/home/vscode/.uv-cache"}` |
 
 `devpod up --recreate` and `.devpodignore` (below) are per workspace too.
+
+#### Temporary files
+
+`/tmp` can live in one of four places. The choice is per workspace, in
+`devcontainer.json`; the provider doesn't force one.
+
+| `/tmp` is | Room for | Speed | Survives a stop | Shared between workspaces |
+| --- | --- | --- | --- | --- |
+| tmpfs (RAM) | RAM + `CONTAINERS_SWAP_MAX` minus what the processes use | RAM; swap speed once it spills | no | no (but the memory is) |
+| bind mount of `/var/tmp` (local disk) | the local disk minus `SWAP_SIZE` | local disk | no | yes |
+| container filesystem (the default) | the volume | the volume | yes, with `PERSIST_DOCKER` | no |
+| named volume | the volume | the volume | yes | only if named alike |
+
+The trade-offs:
+
+- tmpfs is the fastest, but it is memory. It is charged to the container, so
+  a full `/tmp` pushes out the program's own memory, then swaps, then triggers
+  the OOM killer. The memory limits keep the machine reachable, but they stop
+  a process to do so. `tmpfs-size` is only a cap: the real ceiling is
+  `CONTAINERS_MEMORY_MAX` plus `CONTAINERS_SWAP_MAX` for all containers
+  together, not `SWAP_SIZE`. Raise both options to make use of a bigger swap
+  file.
+- Heavy swapping is slow, and a container with full swap can hang for minutes
+  instead of being killed (see `CONTAINERS_MEMORY_HIGH`).
+- The local disk has no such coupling to memory: a full scratch directory
+  fails writes with `ENOSPC` while everything else keeps running. It is
+  charged to nothing, so it is the better home for data that is large or of
+  unknown size (build output, extracted datasets, tool scratchpads such as
+  Claude's) and that is rebuilt, not kept.
+- The local disk is shared with the swap file and with every other
+  workspace on the machine, which have no quota. Keep `SWAP_SIZE` plus all
+  scratch within it, and give each workspace its own subdirectory.
+- The volume is the only place that survives a stop, but it is network
+  storage: slower, and every temporary file counts against `DISK_SIZE` and
+  the warning at 85%.
+
+Rule of thumb: a small `/tmp` (up to about a quarter of RAM) in tmpfs for many
+small, hot files; large or unbounded scratch on the local disk; anything that
+must survive a stop in a named volume.
+
+To use the local disk, point the tools at it. Docker's `--mount` (which DevPod
+uses) refuses a bind source that doesn't exist, so mount `/var/tmp` itself,
+which always exists and is writable by everyone, and create a subdirectory per
+workspace inside the container:
+
+```jsonc
+{
+  "mounts": ["source=/var/tmp,target=/scratch,type=bind"],
+  "containerEnv": { "TMPDIR": "/scratch/my-project-${devcontainerId}" },
+  "postCreateCommand": "mkdir -p \"$TMPDIR\""
+}
+```
+
+`TMPDIR` is honoured by most tools (Python's `tempfile`, Node's `os.tmpdir()`,
+Go, `mktemp`). Anything that hard-codes `/tmp` still lands in the container
+filesystem, so mount the local disk at `/tmp` itself if you need to catch
+those: `"source=/var/tmp,target=/tmp,type=bind"`. That shares `/tmp` between
+the machine's workspaces, and with it the files they create there.
 
 #### Recommended devcontainer settings
 
@@ -221,9 +282,12 @@ changed.
 ```jsonc
 {
   "mounts": [
-    // /tmp in RAM, spilling to swap on the local disk, never to the volume.
-    // Keep the sizes of all workspaces on a machine within RAM + swap.
-    "type=tmpfs,target=/tmp,tmpfs-mode=1777,tmpfs-size=4g",
+    // A small /tmp in RAM, spilling to swap on the local disk, never to the
+    // volume. Keep the sizes of all workspaces on a machine within RAM + swap.
+    "type=tmpfs,target=/tmp,tmpfs-mode=1777,tmpfs-size=2g",
+    // Large scratch on the local disk: fast, charged to no memory limit, lost
+    // on stop. See "Temporary files".
+    "source=/var/tmp,target=/scratch,type=bind",
     // Per-workspace state: include ${devcontainerId}, otherwise workspaces
     // on the same machine share the volume.
     "source=my-project-${devcontainerId}-state,target=/home/vscode/.state,type=volume",
@@ -232,7 +296,11 @@ changed.
     // Package caches: deliberately one per machine, shared by its workspaces
     "source=uv-cache,target=/home/vscode/.uv-cache,type=volume"
   ],
-  "containerEnv": { "UV_CACHE_DIR": "/home/vscode/.uv-cache" }
+  "containerEnv": {
+    "UV_CACHE_DIR": "/home/vscode/.uv-cache",
+    "TMPDIR": "/scratch/my-project-${devcontainerId}"
+  },
+  "postCreateCommand": "mkdir -p \"$TMPDIR\""
 }
 ```
 
