@@ -20,6 +20,7 @@ created by Simon Emms. All credit for the original work goes to the original aut
   - [Persistent storage](#persistent-storage)
     - [Machine options](#machine-options)
     - [Per-workspace settings](#per-workspace-settings)
+    - [Temporary files](#temporary-files)
     - [Recommended devcontainer settings](#recommended-devcontainer-settings)
 - [Development](#development)
   - [Required environment variables](#required-environment-variables)
