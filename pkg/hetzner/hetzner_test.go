@@ -288,7 +288,7 @@ func TestGenerateUserDataDockerOnVolume(t *testing.T) {
 		LogDriver   string `json:"log-driver"`
 		LiveRestore bool   `json:"live-restore"`
 	}
-	assert.NoError(t, json.Unmarshal([]byte(cfg.WriteFiles["/etc/docker/daemon.json"]), &daemon))
+	assert.NoError(t, json.Unmarshal([]byte(cfg.WriteFiles["/etc/docker/devpod-daemon.json"]), &daemon))
 	assert.Equal(t, "/home/devpod/.devpod/docker", daemon.DataRoot)
 	assert.Equal(t, "devpod.slice", daemon.CgroupParent)
 	assert.True(t, daemon.Features["containerd-snapshotter"], "containerd image store must be enabled explicitly")
@@ -303,6 +303,12 @@ func TestGenerateUserDataDockerOnVolume(t *testing.T) {
 	assert.False(t, written, "containerd's config.toml must not be overwritten")
 	containerd := cfg.WriteFiles["/etc/systemd/system/containerd.service.d/10-devpod-volume.conf"]
 	assert.Contains(t, containerd, "ExecStart=\nExecStart=/usr/bin/env containerd --root /home/devpod/.devpod/containerd\n")
+
+	// DevPod's agent overwrites daemon.json; every dockerd start restores it
+	assert.Contains(t, cfg.WriteFiles["/etc/systemd/system/docker.service.d/20-devpod-daemon.conf"],
+		"ExecStartPre=/usr/bin/install -m 0644 /etc/docker/devpod-daemon.json /etc/docker/daemon.json")
+	assert.Less(t, runCmdIndex(cfg.RunCmd, "/etc/docker/daemon.json"), runCmdIndex(cfg.RunCmd, "get.docker.com"),
+		"daemon.json must be in place before Docker is installed")
 
 	for _, unit := range []string{"docker", "containerd"} {
 		assert.Contains(t, cfg.WriteFiles["/etc/systemd/system/"+unit+".service.d/10-devpod-volume.conf"],
@@ -393,7 +399,7 @@ func TestGenerateUserDataMachineOptions(t *testing.T) {
 			} `json:"gc"`
 		} `json:"builder"`
 	}
-	assert.NoError(t, json.Unmarshal([]byte(cfg.WriteFiles["/etc/docker/daemon.json"]), &daemon))
+	assert.NoError(t, json.Unmarshal([]byte(cfg.WriteFiles["/etc/docker/devpod-daemon.json"]), &daemon))
 	assert.Empty(t, daemon.DataRoot, "Docker stays on the local disk without PERSIST_DOCKER")
 	assert.False(t, daemon.Features["containerd-snapshotter"])
 	assert.Equal(t, "20GB", daemon.Builder.GC.DefaultKeepStorage)
